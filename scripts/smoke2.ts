@@ -206,6 +206,52 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   tw.zones.push({ id: 970, t: 0, k: 'clock', x: tw.players.a.x, y: tw.players.a.y, r: 90, life: 4.5 }); step(tw, 1 / 60);
   assert(tw.players.a.slw > 0 && tw.players.a.slf === 0.5, 'a clock bubble slows the pilot');
 
+  // taunts, dance-off, golden rooster, revive dance, weekly challenge, chicken of the day
+  const tn = spawned(5); tn.players.a.lives = 99; for (let i = 0; i < 100; i++) step(tn, 1 / 60);
+  const tb2 = tn.chickens.find((c) => c.boss);
+  assert(typeof tb2.say === 'string' && tb2.say.length > 3, 'a boss taunts when the fight starts');
+  tb2.hp = Math.floor(tb2.max * 0.5); step(tn, 1 / 60);
+  assert(tb2.say && tb2.sayt > 2, 'a boss taunts again when it gets hurt');
+  tb2.hp = Math.max(1, Math.floor(tb2.max * 0.09)); tb2.sh = 1; step(tn, 1 / 60);
+  assert(tb2.dn > 0 && tb2.sh === 0, 'at 10% health the boss starts a dance break and loses its shield');
+  const hpd = tb2.hp; tn.bullets.push({ x: tb2.x, y: tb2.y, vx: 0, vy: 0, o: 'a', w: 'b', d: 1 }); step(tn, 1 / 60);
+  assert(hpd - tb2.hp === 2 || tb2.dead, 'a dancing boss takes double damage');
+  if (!tb2.dead) { for (let i = 0; i < 200; i++) { tn.players.a.lives = 99; step(tn, 1 / 60); } assert(!(tb2.dn > 0), 'the dance break ends after a couple of seconds'); }
+
+  let goldSeen = null;
+  for (let seed = 1; seed < 300 && !goldSeen; seed++) {
+    const g = createState(seed); addPlayer(g, 'a', 'A'); g.wave = 5; g.cleared = true; g.delay = 0; step(g, 1 / 60);
+    goldSeen = g.chickens.find((c) => c.gold) ? g : null;
+  }
+  assert(goldSeen, 'a Golden Rooster shows up on some waves');
+  const gr = goldSeen.chickens.find((c) => c.gold), gx0 = gr.x;
+  goldSeen.players.a.lives = 99; for (let i = 0; i < 60; i++) step(goldSeen, 1 / 60);
+  assert(Math.abs(gr.x - gx0) > 100, 'the Golden Rooster sprints across the screen');
+  gr.hp = 1; goldSeen.bullets.push({ x: gr.x, y: gr.y, vx: 0, vy: 0, o: 'a', w: 'b', d: 1 }); step(goldSeen, 1 / 60);
+  assert(goldSeen.gifts.filter((g) => g.k === 'key').length >= 4 && goldSeen.players.a.score >= 300, 'shooting the Golden Rooster pays 4 keys and a big score');
+
+  const rvv = createState(4); addPlayer(rvv, 'm', 'M', { role: 'medic' }); addPlayer(rvv, 'd', 'D'); rvv.delay = 99;
+  Object.assign(rvv.players.m, { x: 400, y: 500, charge: 100 }); Object.assign(rvv.players.d, { x: 380, y: 520, alive: false, lives: 0 });
+  rvv.players.m.input = { ...emptyInput(), ab: 1 }; step(rvv, 1 / 60);
+  assert(rvv.players.m.dn > 1, 'the rescuer does a revive dance');
+
+  const wk = createState(3, { weekly: { boss: 'ghost', rule: 'glass' } }); addPlayer(wk, 'a', 'A'); wk.delay = 0; step(wk, 1 / 60);
+  assert(wk.chickens.length === 1 && wk.chickens[0].kind === 'ghost' && wk.banner.startsWith('Weekly challenge'), 'the weekly challenge starts with its boss');
+  assert(wk.players.a.lives === 1, 'the glass-cannon weekly rule gives one life');
+  const wb = wk.chickens[0];
+  for (let i = 0; i < 120; i++) { wk.players.a.inv = 5; step(wk, 1 / 60); }
+  wb.sh = 0; wb.hid = 0; wb.dn = 0; wb.hp = 5; wk.bullets.push({ x: wb.x, y: wb.y, vx: 0, vy: 0, o: 'a', w: 'b', d: 1 }); step(wk, 1 / 60);
+  assert(wb.dead || wb.hp <= 3, 'glass cannon: the boss takes double damage');
+  wk.chickens = []; wk.cleared = false; step(wk, 1 / 60);
+  assert(wk.over && wk.won && wk.banner === 'Challenge complete!', 'beating the weekly boss ends the run as a win');
+  const bad = createState(3, { weekly: { boss: 'nope', rule: 'x' }, cotd: 99 });
+  assert(bad.weekly === null && bad.cotd === null, 'invalid weekly/cotd options are ignored');
+
+  const ct = createState(9, { cotd: 3 }); addPlayer(ct, 'a', 'A'); ct.delay = 99;
+  const hit = (id) => { ct.chickens = [{ id, x: 400, y: 300, ox: 0, oy: 220, hp: 1, max: 1, tier: 0, r: 22, fl: 0, dv: 0, ent: 1 }]; const s0 = ct.players.a.score; ct.bullets.push({ x: 400, y: 300, vx: 0, vy: 0, o: 'a', w: 'b', d: 1 }); step(ct, 1 / 60); return ct.players.a.score - s0; };
+  const bonus = hit(13), plain = hit(14);
+  assert(bonus - plain === 50, 'killing a chicken of the day costume pays +50');
+
   // boss rush
   const rush =createState(1, { rush: true }); addPlayer(rush, 'a', 'A'); rush.delay = 0; step(rush, 1 / 60);
   const r1 = rush.chickens.find((c) => c.boss);

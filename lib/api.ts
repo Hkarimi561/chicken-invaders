@@ -12,6 +12,7 @@ import { EVENTS, activeEvent } from '../shared/events';
 import { recordRun, buildBoard, cleanName } from '../shared/leaderboard';
 import { applyRun, claimWeekly, claimSeason, setTitle } from '../shared/progress';
 import { dailyInfo } from '../shared/daily';
+import { weekBossInfo } from '../shared/fun';
 import { sanitizePack } from '../shared/packfmt';
 import { MUT_IDS } from '../shared/sim';
 
@@ -24,7 +25,7 @@ const fail = (status: number, error: string) => json({ error }, status);
 export const serverEvent = () => (EVENTS[process.env.EVENT_OVERRIDE as string] ? (process.env.EVENT_OVERRIDE as string) : activeEvent(new Date()));
 const cleanMut = (list: unknown) => [...new Set((Array.isArray(list) ? list : []).filter((id) => MUT_IDS.includes(id)))] as string[];
 const KEY_RATE_SECONDS = 4;
-const RUN_KINDS = ['solo', 'daily', 'rush'];
+const RUN_KINDS = ['solo', 'daily', 'rush', 'weekboss'];
 
 async function clientIp() {
   const h = await headers();
@@ -136,11 +137,12 @@ async function achSeen({ user }: Ctx) {
 async function runStart({ user, body }: Ctx) {
   const now = Date.now();
   const kind = RUN_KINDS.includes(body.kind) ? body.kind : 'solo';
+  const wk = kind === 'weekboss' ? weekBossInfo(new Date(now)) : null; // weekly boss challenge: one boss + one rule for everyone
   const daily = kind === 'daily' ? dailyInfo(new Date(now)) : null;
-  const mut = daily ? daily.mut : cleanMut(body.mut); // the daily challenge fixes its own rules
+  const mut = daily || wk ? (daily ? daily.mut : []) : cleanMut(body.mut); // daily and weekly challenges fix their own rules
   const runId = crypto.randomBytes(8).toString('hex');
-  await (await getStore()).startRun({ runId, userId: user!.uid, kind, mut, daily, done: false, start: now });
-  return json({ runId, kind, mut, seed: daily ? daily.seed : null, daily, event: serverEvent() });
+  await (await getStore()).startRun({ runId, userId: user!.uid, kind, mut, daily: daily || wk, done: false, start: now }); // a weekboss run keeps its week info in the `daily` slot
+  return json({ runId, kind, mut, seed: daily ? daily.seed : wk ? wk.seed : null, daily, weekly: wk, event: serverEvent() });
 }
 
 async function runEnd({ user, body }: Ctx) {
@@ -167,6 +169,18 @@ async function runEnd({ user, body }: Ctx) {
     mends: lim(st.mends, elapsed / 5 + 2),
     revives: lim(st.revives, elapsed / 5 + 2),
   };
+  if (run.kind === 'weekboss') { // weekly boss challenge: keys, plus a one-time weekly reward for beating the boss; no leaderboard
+    const wk = run.daily as any;
+    const rw = await mutate(user!, (p) => {
+      const k = Math.max(0, Math.floor(credited));
+      p.pending += k; p.stats.runs += 1; p.stats.totalKeys += k;
+      const first = body.won === true && elapsed >= 15 && wk?.id && p.life.lastWeekBoss !== wk.id;
+      if (first) { p.life.lastWeekBoss = wk.id; p.pending += wk.reward; }
+      return { unlocked: [], weekBossDone: !!first, weekBossReward: first ? wk.reward : 0 };
+    });
+    if (!rw) return unknownAccount();
+    return json({ profile: rw.profile, credited, score, wave, result: rw.result });
+  }
   const r = await mutate(user!, (p) => {
     const k = Math.max(0, Math.floor(credited));
     p.pending += k; p.stats.runs += 1; p.stats.totalKeys += k; p.stats.bestWave = Math.max(p.stats.bestWave, wave);

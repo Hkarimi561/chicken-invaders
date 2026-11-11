@@ -13,6 +13,9 @@ import { theme } from './theme';
 import { costumeBack, costumeFront } from './costumes';
 import { hasSkin, bossBody, bossBack, bossFront, skinAlpha } from './bossskins';
 import { drawFloorZones, drawAirZones, drawFrozen, drawIceShard } from './bossfx';
+import { speech, danceNotes, cotdStar, reviveConfetti } from './funfx';
+import { drawEmotes } from './emotes';
+import { WEEK_RULES } from '../shared/fun';
 import { TRAIL_INFO } from '../shared/catalog';
 import { detectEvents, ambient, updateParts, drawParts, shakeAmount, getFlare, getSummary, getCombo, heartLostAt, lensRings, spark, COMBO_COL } from './fx';
 
@@ -156,7 +159,9 @@ function chicken(ctx, c, t, env) {
   }
   if (entering) ctx.globalAlpha = 0.3 + 0.7 * c.ent;
   if (skin) ctx.globalAlpha *= skinAlpha(c);
-  ctx.translate(c.x + (panic ? (Math.random() - 0.5) * 1.6 : 0), c.y + bob);
+  const dancing = c.dn > 0;
+  ctx.translate(c.x + (panic ? (Math.random() - 0.5) * 1.6 : 0) + (dancing ? Math.sin(t * 12) * 7 : 0), c.y + bob - (dancing ? Math.abs(Math.sin(t * 9)) * 14 : 0));
+  if (dancing) ctx.rotate(Math.sin(t * 12) * 0.16);
   ctx.scale(k, k);
 
   shadowEllipse(ctx, 7, 16, 20, 17, 0.3);
@@ -298,7 +303,9 @@ function chicken(ctx, c, t, env) {
     ctx.globalCompositeOperation = 'source-over';
   }
   if (c.boss || c.mini) bossExtras(ctx, c, t);
+  if (dancing) danceNotes(ctx, t, 1);
   ctx.restore();
+  if (c.say && c.sayt > 0) speech(ctx, c.x, c.y - (c.boss ? 32 : 26) * k, c.say, c.sayt);
 
   // remaining-hits pips (only once damaged)
   if (!c.boss && !c.chick && c.hp < c.max) {
@@ -1054,7 +1061,8 @@ function hud(ctx, s: State, me, t) {
     ctx.fillStyle = 'rgba(255,255,255,.5)';
     ctx.fillRect(W / 2 - 125 + 250 * 0.33, H - 24, 1.5, 8); ctx.fillRect(W / 2 - 125 + 250 * 0.66, H - 24, 1.5, 8);
     ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = boss.sh ? '#fff3b0' : '#ffccbc';
-    ctx.fillText((BOSS_NAMES[boss.kind] || 'BOSS').toUpperCase() + (boss.sh ? '  -  SHIELDED' : ''), W / 2, H - 36);
+    const wkRule = s.weekly ? WEEK_RULES.find((r) => r.id === s.weekly.rule) : null;
+    ctx.fillText((BOSS_NAMES[boss.kind] || 'BOSS').toUpperCase() + (boss.sh ? '  -  SHIELDED' : '') + (boss.dn > 0 ? '  -  DANCING! HIT HIM!' : '') + (wkRule ? '  -  ' + wkRule.name.toUpperCase() : ''), W / 2, H - 36);
   }
 }
 
@@ -1206,7 +1214,9 @@ export function draw(ctx, s: State, me, t, { paused, silent, quiet, replay }: { 
   for (const c of [...s.chickens].sort((a, b) => a.y - b.y)) {
     const ps = chickenSlot(c);
     if (ps && !hasSkin(c) && !c.boss) packChicken(ctx, c, t, ps);
-    else if (full || c.boss || c.dec || c.sol) chicken(ctx, c, t, cenv); else chickenLite(ctx, c, t);
+    else if (full || c.boss || c.dec || c.sol || c.gold) chicken(ctx, c, t, cenv); else chickenLite(ctx, c, t);
+    if (s.cotd != null && !c.boss && !c.chick && !c.mini && !c.dec && !c.sol && !c.gold && c.id % 10 === s.cotd) // chicken of the day
+      cotdStar(ctx, c.x, c.y - 34 * (c.r / 22) * (0.86 + (c.y / H) * 0.32), t);
   }
   for (const g of s.gifts) gift(ctx, g, t);
   for (const e of s.eggs) egg(ctx, e, t);
@@ -1216,8 +1226,14 @@ export function draw(ctx, s: State, me, t, { paused, silent, quiet, replay }: { 
   arcs(ctx, s);
   beams(ctx, s, t);
   pulses(ctx, s);
-  for (const p of list) if (p.alive) { ship(ctx, p, t); heatBar(ctx, p, t); }
+  for (const p of list) if (p.alive) {
+    const spin = p.dn > 0; // revive dance: a victory spin with confetti
+    if (spin) { const u = 1 - p.dn / 1.4; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(u * u * (3 - 2 * u) * Math.PI * 4); ctx.translate(-p.x, -p.y); }
+    ship(ctx, p, t); heatBar(ctx, p, t);
+    if (spin) { ctx.restore(); reviveConfetti(ctx, p, t); }
+  }
   drawFrozen(ctx, list, t);
+  drawEmotes(ctx, s.players);
   drawParts(ctx);
   if (list.length > 1) for (const p of list) if (p.alive) nameTag(ctx, p);
   eventFront(ctx, t, quality.level);

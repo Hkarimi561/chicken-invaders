@@ -21,13 +21,18 @@ export function shadowEllipse(ctx, x, y, rx, ry, a = 0.35) {
 export const quality = { level: 2 };
 export const IS_TOUCH = typeof window !== 'undefined' && ('ontouchstart' in window || (navigator.maxTouchPoints || 0) > 0);
 
+/** Ask the phone to stay in landscape. Browsers only allow this in fullscreen or an installed app, so a CSS notice covers the rest. */
+export function lockLandscape() {
+  try { (window.screen.orientation as any)?.lock?.('landscape')?.catch?.(() => {}); } catch { /* not supported */ }
+}
+
 /** Fullscreen helpers. requestFullscreen must be called from a user gesture (a tap or click). */
 export function enterFullscreen() {
   try {
     const el = document.documentElement;
     if (document.fullscreenElement || !el.requestFullscreen) return;
     const p = el.requestFullscreen({ navigationUI: 'hide' });
-    if (p && p.then) p.then(() => { try { (window.screen.orientation as any)?.lock?.('landscape').catch(() => {}); } catch { /* not supported */ } }).catch(() => {});
+    if (p && p.then) p.then(lockLandscape).catch(() => {});
   } catch { /* not allowed here */ }
 }
 export function exitFullscreen() {

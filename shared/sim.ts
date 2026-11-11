@@ -3,7 +3,7 @@
 export const W = 800;
 export const H = 600;
 /** Bump whenever a change would make an old recording play out differently. */
-export const SIM_VERSION = 8;
+export const SIM_VERSION = 10;
 
 import { PALETTE, SKINS, SHOP_GUN_IDS, TRAIL_INFO } from './catalog';
 import type { State, Player, Input, Loadout } from './types';
@@ -36,6 +36,29 @@ export const ROLES = {
 export const ROLE_IDS = Object.keys(ROLES);
 
 export const BOSS_KINDS = ['rooster', 'mother', 'sweeper', 'splitter', 'mirror', 'colonel', 'bomber', 'timewarp', 'magnet', 'ghost', 'lava', 'diva', 'cloner', 'tank', 'iceq'];
+/** Weekly boss challenge rules (see shared/fun.ts for the names and the weekly pick). */
+export const WEEK_RULE_IDS = ['freeze', 'hurry', 'glass', 'storm'];
+
+// What each boss shouts: [fight starts, hurt (66%), enraged (33%), dance break (10%)]
+const TAUNTS = {
+  rooster: ['Bow before the Rooster King!', 'You dare scratch my crown?!', 'NOW I AM ANGRY!', 'Disco time! Hit me!'],
+  mother: ['My chicks will peck you!', 'Nobody hurts my babies!', 'MOTHER IS FURIOUS!', 'Dance with mama!'],
+  sweeper: ['Lasers locked. Hold still!', 'Recalibrating beams...', 'FULL SWEEP!', 'Beep boop dance mode'],
+  splitter: ['Two heads are better!', 'Split decision!', 'We are many!', 'Everybody split-dance!'],
+  mirror: ['Reflect on this.', 'Seeing double?', 'Smash all mirrors!', 'Mirror, mirror, dancing'],
+  colonel: ['Squad, forward!', 'Hold the line, soldiers!', 'No retreat!', 'At ease... dance!'],
+  bomber: ['Bombs away!', 'The fuse is getting shorter!', 'CARPET OF EGGS!', 'Out of bombs... dancing!'],
+  timewarp: ['Time is on my side.', 'Tick... tock...', 'TIME STOPS NOW!', 'Time for a dance break'],
+  magnet: ['Feeling attracted?', 'Come closer!', 'MAXIMUM MAGNET!', 'Spinning on my magnets!'],
+  ghost: ['Boo! Can you see me?', 'Now you see me...', 'THE HAUNTING BEGINS!', 'Spooky dance!'],
+  lava: ['Feeling hot hot hot!', 'The floor is lava!', 'ERUPTION!', 'Hot dance, cool down!'],
+  diva: ['The show must go on!', 'Feel the beat!', 'ENCORE!', 'Let us boogie!'],
+  cloner: ['Which one is the real me?', 'Copy that!', 'CLONE ARMY!', 'All of us dance!'],
+  tank: ['Armor up!', 'You dented my helmet!', 'FULL CHARGE!', 'Tanks can dance too!'],
+  iceq: ['Let it freeze!', 'You are getting cold...', 'ETERNAL WINTER!', 'Ice, ice, dance!'],
+};
+const say = (c, i) => { const t = TAUNTS[c.kind]; if (t) { c.say = t[i]; c.sayt = 2.8; } };
+
 export const BOSS_NAMES = {
   rooster: 'Rooster King', mother: 'Mother Hen', sweeper: 'Laser Sweeper', splitter: 'The Splitter', mirror: 'Mirror Hen',
   colonel: 'Colonel Cluck', bomber: 'Egg Bomber', timewarp: 'Time Warp Hen', magnet: 'Magnet Rooster', ghost: 'Ghost Hen',
@@ -63,6 +86,9 @@ export function createState(seed: number = (Math.random() * 1e9) >>> 0, opts: an
     pattern: 'grid', gx: 0, gy: 0, gdir: 1, hw: 0, flaw: true, cleared: false,
     mut, rush: !!opts.rush, daily: !!opts.daily, ev: typeof opts.event === 'string' && /^[a-z]{3,12}$/.test(opts.event) ? opts.event : null,
     smul: 1 + 0.2 * mut.length, kmul: 1 + 0.25 * mut.length,
+    // weekly boss challenge: { boss, rule } (validated); chicken of the day: 0-9, kills of that costume pay a bonus
+    weekly: opts.weekly && BOSS_KINDS.includes(opts.weekly.boss) && WEEK_RULE_IDS.includes(opts.weekly.rule) ? { boss: opts.weekly.boss, rule: opts.weekly.rule } : null,
+    cotd: Number.isInteger(opts.cotd) && opts.cotd >= 0 && opts.cotd < 10 ? opts.cotd : null, won: false,
     players: {}, chickens: [], bullets: [], eggs: [], gifts: [], fxArcs: [], fxPulse: [], meteors: [], meteorWave: false, mt: 0, zones: [],
   };
 }
@@ -80,7 +106,7 @@ export function addPlayer(s: State, id: string, name: string, opts: any = {}) {
   const base = SHOP_GUN_IDS.includes(opts.gun) ? opts.gun : 'blaster';
   const role = ROLE_IDS.includes(opts.role) ? opts.role : 'ace';
   let lives = Math.min(5, 3 + mods.hull + (role === 'tank' ? 1 : 0));
-  if (s.mut && s.mut.includes('glass')) lives = 1;
+  if ((s.mut && s.mut.includes('glass')) || s.weekly?.rule === 'glass') lives = 1;
   s.players[id] = {
     id, name: String(name || 'Pilot').slice(0, 14), color: col, role,
     skin: SKINS.includes(opts.skin) ? opts.skin : 'plain',
@@ -108,6 +134,7 @@ const eggAt = (s: State, x, y, ang, sp) => s.eggs.push({ id: s.nid++, x, y, vx: 
 const has = (s: State, id) => s.mut.includes(id);
 
 function bossKindFor(s: State) {
+  if (s.weekly) return s.weekly.boss;
   const idx = s.rush ? s.wave - 1 : Math.floor(s.wave / 5) - 1;
   return BOSS_KINDS[((idx % BOSS_KINDS.length) + BOSS_KINDS.length) % BOSS_KINDS.length];
 }
@@ -121,15 +148,15 @@ function spawnWave(s: State) {
   s.wave++;
   s.chickens = []; s.eggs = []; s.meteors = []; s.zones = []; s.gy = 0; s.gx = 0; s.gdir = 1;
   s.flaw = true; s.cleared = false;
-  const boss = s.rush || s.wave % 5 === 0;
+  const boss = s.rush || !!s.weekly || s.wave % 5 === 0;
   // every fourth wave (that is not a boss wave) is a meteor strike: the chickens stop laying, rocks fall instead
   s.meteorWave = !boss && s.wave >= 4 && s.wave % 4 === 0;
   s.mt = 2.5;
-  s.eff = s.rush ? s.wave * 5 : s.wave; // what difficulty scales with (a rush wave is a whole boss)
+  s.eff = s.weekly ? 12 : s.rush ? s.wave * 5 : s.wave; // what difficulty scales with (a rush wave is a whole boss)
   const kind = boss ? bossKindFor(s) : null;
   const newWorld = (s.wave - 1) % 5 === 0 && s.wave > 1;
   const world = WORLD_NAMES[Math.floor((s.rush ? s.eff - 1 : s.wave - 1) / 5) % WORLD_NAMES.length];
-  s.banner = boss ? (s.rush ? `Boss Rush ${s.wave} - ${BOSS_NAMES[kind]}` : `Wave ${s.wave} - ${BOSS_NAMES[kind]}`)
+  s.banner = boss ? (s.weekly ? `Weekly challenge - ${BOSS_NAMES[kind]}` : s.rush ? `Boss Rush ${s.wave} - ${BOSS_NAMES[kind]}` : `Wave ${s.wave} - ${BOSS_NAMES[kind]}`)
     : newWorld ? `Wave ${s.wave} - ${world}` : `Wave ${s.wave}`;
   if (s.meteorWave) s.banner += ' - Meteor strike!';
   s.bt = 2.2;
@@ -172,14 +199,22 @@ function spawnWave(s: State) {
     const rows = Math.min(3 + Math.floor(s.wave / 3) + (swarm ? 1 : 0), swarm ? 6 : 5);
     const cols = Math.min(6 + Math.floor(s.wave / 2) + (swarm ? 2 : 0), swarm ? 12 : 10);
     s.hw = ((cols - 1) / 2) * 62 + 30;
+    s.gymax = Math.max(0, H - 150 - 80 - (rows - 1) * 54); // the formation stops stepping down here: chickens never "land", pilots just fight them
     for (let r = 0; r < rows; r++)
       for (let c = 0; c < cols; c++)
         s.chickens.push(mk({ ox: (c - (cols - 1) / 2) * 62, oy: r * 54 }));
   }
+  // rare: a Golden Rooster sprints across the screen. Shoot it before it escapes for keys and a big score.
+  if (s.wave >= 3 && rnd(s) < 0.15) {
+    const dir = rnd(s) < 0.5 ? 1 : -1, hp = 6 + Math.floor(s.wave / 4);
+    s.chickens.push({ id: s.nid++, x: dir > 0 ? -60 : W + 60, y: 170, hp, max: hp, tier: 0, r: 26, fl: 0, gold: true, dir, gt: 0, ent: 1, say: 'Catch me if you can!', sayt: 3 });
+  }
 }
 
 function killChicken(s: State, c, owner: Player) {
-  const pts = Math.round((c.boss ? 500 : 10 * (c.max || 1)) * s.smul);
+  let pts = Math.round((c.boss ? 500 : c.gold ? 300 : 10 * (c.max || 1)) * s.smul);
+  // chicken of the day: kills of today's costume pay a small bonus
+  if (s.cotd != null && !c.boss && !c.chick && !c.mini && !c.dec && !c.sol && !c.gold && c.id % 10 === s.cotd) pts += 50;
   if (owner) {
     owner.score += pts; owner.kills++;
     if (owner.role === 'tank' || owner.role === 'medic') owner.charge = Math.min(100, (owner.charge || 0) + (c.boss ? 40 : 3 + 2 * (c.max || 1)));
@@ -187,7 +222,7 @@ function killChicken(s: State, c, owner: Player) {
   }
   if (c.boss) s.gifts.push({ id: s.nid++, x: c.x, y: c.y, k: 'nova', bx: c.x }); // the only source of Nova charge
   const noDrops = has(s, 'drought') || c.mini || c.dec || c.sol;
-  const drops = noDrops ? 0 : c.boss ? 4 : rnd(s) < 0.16 ? 1 : 0;
+  const drops = noDrops ? 0 : c.boss ? 4 : c.gold ? 3 : rnd(s) < 0.16 ? 1 : 0;
   for (let i = 0; i < drops; i++) {
     const r = rnd(s);
     let k = r < 0.45 ? 'power' : r < 0.55 ? 'life' : r < 0.65 ? 'food' : r < 0.78 ? 'ice' : 'wpn';
@@ -197,7 +232,7 @@ function killChicken(s: State, c, owner: Player) {
   }
   // keys are the shop currency: tougher vests, bosses, event bosses and harder rules drop more
   const chance = (0.04 + 0.02 * (c.tier || 0)) * s.kmul;
-  const keys = c.boss ? (c.mother ? 5 : 3) + (c.ev ? 2 : 0) + s.mut.length : c.chick || c.mini || c.dec || c.sol ? 0 : rnd(s) < chance ? 1 : 0;
+  const keys = c.boss ? (c.mother ? 5 : 3) + (c.ev ? 2 : 0) + s.mut.length : c.gold ? 4 : c.chick || c.mini || c.dec || c.sol ? 0 : rnd(s) < chance ? 1 : 0;
   for (let i = 0; i < keys; i++) s.gifts.push({ id: s.nid++, x: c.x + (i - (keys - 1) / 2) * 22, y: c.y, k: 'key' });
 }
 
@@ -227,6 +262,8 @@ function damage(s: State, c, d, owner: Player) {
     if (c.ab >= 8) { c.ab = 0; c.arm--; }
     return;
   }
+  if (c.dn > 0) d *= 2; // dance break: the boss is wide open
+  if (c.boss && s.weekly?.rule === 'glass') d *= 2; // weekly rule: glass cannon
   c.hp -= d; c.fl = 0.08;
   if (owner) owner.score += 1;
   if (c.hp <= 0) { c.dead = true; killChicken(s, c, owner); }
@@ -319,7 +356,7 @@ function useAbility(s: State, p: Player) {
   } else if (p.role === 'medic') { // Mend: heal and revive everyone nearby
     for (const q of players) {
       if (!within(q, p, 200)) continue;
-      if (!q.alive) { q.alive = true; q.lives = 1; q.inv = invTime(q); q.rv = 0; p.st.revives++; }
+      if (!q.alive) { q.alive = true; q.lives = 1; q.inv = invTime(q); q.rv = 0; p.st.revives++; p.dn = 1.4; }
       else if (q.lives < 5 && !has(s, 'glass')) { q.lives++; p.st.mends++; }
     }
     pulse(s, p, 'mend', 200);
@@ -395,6 +432,7 @@ function bossAttack(s: State, c) {
   if (c.kind === 'mirror') c.bt *= 0.75;
   if (c.kind === 'sweeper') c.bt *= 1.35;
   c.bt *= slow;
+  if (s.weekly?.rule === 'hurry') c.bt *= 0.65; // weekly rule: the boss attacks faster
 }
 
 export function step(s: State, dt) {
@@ -411,6 +449,7 @@ export function step(s: State, dt) {
     p.cd -= dt; if (p.inv > 0) p.inv -= dt;
     if (p.ice > 0) p.ice = Math.max(0, p.ice - dt);
     if (p.frz > 0) p.frz = Math.max(0, p.frz - dt);
+    if (p.dn > 0) p.dn = Math.max(0, p.dn - dt);
     if (p.slw > 0) p.slw = Math.max(0, p.slw - dt);
     if (p.wt > 0 && (p.wt -= dt) <= 0) { p.wt = 0; p.weapon = p.base || 'blaster'; } // a picked-up gun wears off and the shop gun returns
     if (p.alive) {
@@ -423,7 +462,7 @@ export function step(s: State, dt) {
       let near = false, med = false, who = null;
       for (const q of players) if (q.alive && within(q, p, 46)) { near = true; if (q.role === 'medic') med = true; who = q; }
       p.rv = near ? p.rv + dt * (med ? 2 : 1) : Math.max(0, p.rv - dt);
-      if (p.rv >= 1.5) { p.alive = true; p.lives = 1; p.inv = invTime(p); p.rv = 0; if (who) who.st.revives++; }
+      if (p.rv >= 1.5) { p.alive = true; p.lives = 1; p.inv = invTime(p); p.rv = 0; if (who) { who.st.revives++; who.dn = 1.4; } } // the rescuer does a victory spin
       continue;
     }
     const i = p.input;
@@ -454,7 +493,7 @@ export function step(s: State, dt) {
   if (s.pattern === 'grid') {
     s.gx += s.gdir * (55 + s.wave * 4) * fk * dt;
     const lim = W / 2 - s.hw;
-    if (Math.abs(s.gx) > lim) { s.gx = Math.sign(s.gx) * lim; s.gdir *= -1; s.gy += 14; }
+    if (Math.abs(s.gx) > lim) { s.gx = Math.sign(s.gx) * lim; s.gdir *= -1; s.gy = Math.min(s.gy + 14, s.gymax ?? 120); }
   } else if (s.pattern === 'ring') {
     s.gy = Math.min(70, s.gy + 3 * dt);
   }
@@ -470,6 +509,12 @@ export function step(s: State, dt) {
 
   for (const c of s.chickens) {
     if (c.fl > 0) c.fl -= dt;
+    if (c.gold) { // the Golden Rooster sprints across and is gone if nobody catches it
+      c.gt += dt; c.x += c.dir * 210 * dt; c.y = 170 + Math.sin(c.gt * 2.2) * 60;
+      if (c.sayt > 0) c.sayt -= dt;
+      if (c.dir > 0 ? c.x > W + 70 : c.x < -70) c.dead = true;
+      continue;
+    }
     if (c.chick) { // mother hen's chicks: free-flying, drift down and away
       c.x += c.vx * dt; c.y += c.vy * dt; c.vx += Math.sin(s.t * 3 + c.id) * 40 * dt;
       if (c.y > H + 30 || c.x < -40 || c.x > W + 40) c.dead = true;
@@ -504,10 +549,15 @@ export function step(s: State, dt) {
     if (c.boss) {
       const ratio = c.hp / c.max;
       c.ph = ratio > 0.66 ? 1 : ratio > 0.33 ? 2 : 3;
+      if (c.sayt > 0) c.sayt -= dt;
+      if (c.ph !== c.lph) { say(c, c.lph === undefined ? 0 : c.ph - 1); c.lph = c.ph; } // taunt when the fight starts and on each new phase
+      if (ratio <= 0.1 && !c.dnd) { c.dnd = 1; c.dn = 2.2; say(c, 3); } // dance break: no attacks, no shield, double damage
+      if (c.dn > 0 && (c.dn -= dt) <= 0) { c.dn = 0; c.open = c.dash != null ? 1 : 0; }
       if (c.mother) c.sh = c.ph === 3 && s.t % 6 > 4 ? 1 : 0; // wings shield every 6s
       else if (c.kind === 'splitter') c.sh = minis > 0 ? 1 : 0;  // invulnerable while its pieces live
       else if (c.kind === 'colonel') c.sh = s.chickens.some((x) => x.ld && !x.dead) ? 1 : 0; // shielded until the squad leader falls
       else c.sh = 0;
+      if (c.dn > 0) { c.sh = 0; c.hid = 0; c.open = 1; } // dancing: nothing protects the boss
       by = 110 + Math.sin(s.t * 1.3) * 20;
       if (c.kind === 'mirror') {
         // Slides to the opposite side of the screen from the pilots, with a capped speed (never jumps).
@@ -590,7 +640,7 @@ export function step(s: State, dt) {
       }
     } else {
       c.bt -= dt;
-      if (c.bt <= 0) { if (c.hid) c.bt = 0.4; else bossAttack(s, c); }
+      if (c.bt <= 0) { if (c.hid || c.dn > 0) c.bt = 0.4; else bossAttack(s, c); }
       if (c.kind === 'magnet') { // pull on for ~3 s, then a breather
         c.pt = (c.pt ?? 3) - dt;
         if (c.pt <= 0) { c.pl = c.pl ? 0 : 1; c.pt = c.pl ? 3.2 : 3.6 - 0.3 * c.ph; }
@@ -654,9 +704,19 @@ export function step(s: State, dt) {
         }
       }
     }
-    if (by > H - 120) {
-      s.over = true; s.banner = 'The chickens landed!';
-      for (const p of players) { p.alive = false; p.lives = 0; }
+  }
+
+  // weekly boss challenge rules
+  if (s.weekly && s.bt <= 0) {
+    const wb = s.chickens.find((x) => x.boss);
+    if (wb && wb.ent >= 1) {
+      if (s.weekly.rule === 'freeze') { // every 20 s the whole crew freezes for a second
+        s.wf = (s.wf ?? 20) - dt;
+        if (s.wf <= 0) { s.wf = 20; for (const p of players) if (p.alive) p.frz = 1; }
+      } else if (s.weekly.rule === 'storm') { // an extra ring of eggs every 6 s
+        s.ws = (s.ws ?? 6) - dt;
+        if (s.ws <= 0) { s.ws = 6; if (!wb.hid && !(wb.dn > 0)) ring(s, wb.x, wb.y + 20, 12, 150, s.t); }
+      }
     }
   }
 
@@ -850,10 +910,11 @@ export function step(s: State, dt) {
   s.gifts = s.gifts.filter((g) => !g.dead);
 
   // wave flow / game over
-  if (players.length && players.every((p) => !p.alive)) { s.over = true; if (!s.banner.includes('landed')) s.banner = 'Game over'; return; }
+  if (players.length && players.every((p) => !p.alive)) { s.over = true; s.banner = 'Game over'; return; }
   if (s.chickens.length === 0) {
     if (s.wave > 0 && !s.cleared) {
       s.cleared = true;
+      if (s.weekly) { s.won = true; s.over = true; s.banner = 'Challenge complete!'; return; } // the weekly challenge is a single boss fight
       if (s.flaw) { // co-op bonus: nobody got hit this wave
         for (const p of players) if (p.alive) { p.score += 200; p.st.flawless++; }
         s.banner = 'Flawless! +200'; s.bt = 2;

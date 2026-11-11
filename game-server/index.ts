@@ -9,6 +9,7 @@ import { loadoutOf } from '../shared/catalog';
 import { EVENTS, activeEvent } from '../shared/events';
 import { recordRun, cleanName } from '../shared/leaderboard';
 import { applyRun } from '../shared/progress';
+import { cotdInfo } from '../shared/fun';
 import { verifyToken } from '../lib/auth';
 import { getStore } from '../lib/store';
 
@@ -19,6 +20,7 @@ const MAX_SPECTATORS = 8;
 const GRACE_MS = 30000; // how long a dropped player keeps their seat
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || ''; // e.g. https://your-game.vercel.app (empty = any, for local use)
 // The running seasonal event (decides the event boss costume). EVENT_OVERRIDE=halloween forces one.
+const EMOTE_IDS = ['cluck', 'heart', 'laugh', 'gg', 'help'];
 const serverEvent = () => (EVENTS[process.env.EVENT_OVERRIDE as string] ? (process.env.EVENT_OVERRIDE as string) : activeEvent(new Date()));
 const cleanMut = (list: unknown) => [...new Set((Array.isArray(list) ? list : []).filter((id) => MUT_IDS.includes(id)))] as string[];
 const logErr = (what: string) => (e: unknown) => console.error(what + ':', (e as Error)?.message || e);
@@ -174,7 +176,7 @@ function finalizeHeld(room, ws) {
 }
 
 function startGame(room) {
-  room.state = createState(undefined, { mut: room.settings.mut, event: serverEvent() });
+  room.state = createState(undefined, { mut: room.settings.mut, event: serverEvent(), cotd: cotdInfo(new Date()).index });
   room.overHandled = false;
   for (const c of room.clients) {
     c.creditedKeys = 0; c.runRecorded = false;
@@ -268,6 +270,13 @@ const onConnection = (ws: Conn) => {
       if (m.t === 'input' && room.state && m.input) {
         const i = m.input;
         setInput(room.state, ws.pid, { ...emptyInput(), left: +!!i.left, right: +!!i.right, up: +!!i.up, down: +!!i.down, fire: +!!i.fire, ab: +!!i.ab, tx: num(i.tx), ty: num(i.ty) });
+      } else if (m.t === 'emote' && room.phase === 'playing') { // team emotes: a short cluck, heart, laugh... shown over the sender's ship
+        const id = String(m.id || '');
+        const now = Date.now();
+        if (EMOTE_IDS.includes(id) && now - (ws.lastEmote || 0) > 700) {
+          ws.lastEmote = now;
+          for (const c of [...room.clients, ...room.specs]) send(c, { t: 'emote', pid: ws.pid, id });
+        }
       } else if (m.t === 'start' && room.host === ws.pid && room.phase === 'lobby') {
         startGame(room);
       } else if (m.t === 'restart' && room.host === ws.pid && room.state?.over) {

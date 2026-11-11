@@ -3,8 +3,8 @@
 const SKINNED = new Set(['colonel', 'bomber', 'timewarp', 'magnet', 'ghost', 'lava', 'diva', 'cloner', 'tank', 'iceq']);
 
 /** True when this chicken gets one of the special skins below. */
-export const hasSkin = (c) => !!c.sol || ((c.boss || c.dec) && SKINNED.has(c.kind));
-const kindOf = (c) => (c.sol ? 'sol' : c.kind);
+export const hasSkin = (c) => !!c.sol || !!c.gold || ((c.boss || c.dec) && SKINNED.has(c.kind));
+const kindOf = (c) => (c.sol ? 'sol' : c.gold ? 'gold' : c.kind);
 
 const body = (ctx) => { ctx.beginPath(); ctx.ellipse(0, 2, 18, 20, 0, 0, 7); };
 const TAU = Math.PI * 2;
@@ -42,6 +42,7 @@ export function skinAlpha(c): number {
 export function bossBody(ctx, c, t) {
   const k = kindOf(c);
   if (k === 'sol') { tint(ctx, '#5a6b2c', 0.55); return; }
+  if (k === 'gold') { tint(ctx, '#ffd54f', 0.78); return; }
   if (k === 'colonel') {
     tint(ctx, '#5a6b2c', 0.6);
     ctx.save(); body(ctx); ctx.clip(); ctx.fillStyle = 'rgba(30,45,15,.55)';
@@ -101,6 +102,10 @@ export function bossBody(ctx, c, t) {
 /** Behind the wings and body. */
 export function bossBack(ctx, c, t) {
   const k = kindOf(c);
+  if (k === 'gold') { // sparkle trail behind the runner
+    for (let i = 0; i < 8; i++) { const ph = (t * 3 + i / 8) % 1; ctx.globalAlpha = (1 - ph) * 0.9; ctx.fillStyle = i % 2 ? '#fff59d' : '#ffca28'; ctx.beginPath(); ctx.arc(-(c.dir || 1) * (10 + ph * 60), Math.sin(i * 2.3) * 14, 3.2 * (1 - ph) + 1, 0, TAU); ctx.fill(); }
+    ctx.globalAlpha = 1;
+  }
   if (k === 'timewarp') { gear(ctx, -27, -4, 10, 9, t * 0.9, '#9fa8da'); gear(ctx, 27, 12, 8, 8, -t * 1.2, '#7986cb'); gear(ctx, 24, -14, 6, 7, t * 1.5, '#c5cae9'); }
   else if (k === 'bomber') { // twin egg-bomb tanks strapped on the back
     for (const s of [-1, 1]) { ctx.fillStyle = '#6d4c41'; ctx.beginPath(); ctx.roundRect(s * 20 - 5, -6, 10, 26, 4); ctx.fill(); outline(ctx);
@@ -131,7 +136,13 @@ export function bossBack(ctx, c, t) {
 export function bossFront(ctx, c, t) {
   const k = kindOf(c);
   ctx.save(); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  if (k === 'sol') { // helmet, chin strap, star; the leader also has a plume and a bigger star
+  if (k === 'gold') { // royal crown, shiny shades and a bling medallion
+    ctx.fillStyle = '#ff8f00'; ctx.beginPath(); ctx.moveTo(-13, -17); ctx.lineTo(-13, -30); ctx.lineTo(-6, -23); ctx.lineTo(0, -34); ctx.lineTo(6, -23); ctx.lineTo(13, -30); ctx.lineTo(13, -17); ctx.closePath(); ctx.fill(); outline(ctx);
+    ctx.fillStyle = '#e53935'; ctx.beginPath(); ctx.arc(0, -22, 2.2, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.fillRect(-12, -10, 10, 6); ctx.fillRect(2, -10, 10, 6); ctx.fillRect(-2, -8.5, 4, 1.6);
+    ctx.fillStyle = 'rgba(255,255,255,.8)'; ctx.fillRect(-10, -9.5, 3, 1.4); ctx.fillRect(4, -9.5, 3, 1.4);
+    ctx.fillStyle = '#fff59d'; ctx.beginPath(); ctx.arc(0, 18, 3.5, 0, TAU); ctx.fill(); outline(ctx, 1);
+  } else if (k === 'sol') { // helmet, chin strap, star; the leader also has a plume and a bigger star
     ctx.fillStyle = '#4a5a22'; ctx.beginPath(); ctx.moveTo(-17, -9); ctx.quadraticCurveTo(-16, -30, 0, -30); ctx.quadraticCurveTo(16, -30, 17, -9); ctx.closePath(); ctx.fill(); outline(ctx);
     ctx.fillStyle = '#3a4619'; ctx.fillRect(-19, -10, 38, 3.5);
     star(ctx, 0, -20, c.ld ? 5 : 3.5, c.ld ? '#ffd54f' : '#e0e0e0');

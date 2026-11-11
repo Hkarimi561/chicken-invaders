@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Game from './Game';
 import { connect } from './net';
-import { ROLES, ROLE_IDS, MUT_IDS, MUTATORS } from '../shared/sim';
+import { ROLES, ROLE_IDS, MUT_IDS, MUTATORS, BOSS_NAMES } from '../shared/sim';
 import { loadoutOf } from '../shared/catalog';
 import { dailyInfo } from '../shared/daily';
+import { cotdInfo, weekBossInfo } from '../shared/fun';
 import { ratingOf } from '../shared/leaderboard';
 import { levelOf, ACHIEVEMENTS } from '../shared/progress';
 import { EVENTS, activeEvent, nextEvent } from '../shared/events';
@@ -11,7 +12,7 @@ import * as store from './profile';
 import AuthScreen from './AuthScreen';
 import GiftCard from './GiftCard';
 import Admin from './Admin';
-import { IS_TOUCH, enterFullscreen } from './util';
+import { IS_TOUCH, enterFullscreen, toggleFullscreen, lockLandscape } from './util';
 import { settings } from './settings';
 import { theme, initTheme, setEventMode } from './theme';
 import { loadActivePack } from './packs';
@@ -55,7 +56,16 @@ function EventBar({ mode, onPick }: Record<string, any>) {
   );
 }
 
-const Shell = ({ children, gaming }: { children?: any; gaming?: boolean }) => <div className={'shell' + (gaming ? ' gaming' : '')}>{children}</div>;
+function RotateNotice() {
+  return (
+    <div className="rotate-notice" role="alert">
+      <div className="rn-phone" aria-hidden="true" />
+      <b>Rotate your phone</b>
+      <span>Chicken Blasters plays in landscape</span>
+    </div>
+  );
+}
+const Shell = ({ children, gaming, menu }: { children?: any; gaming?: boolean; menu?: boolean }) => <div className={'shell' + (gaming ? ' gaming' : '') + (menu ? ' menu-shell' : '')}>{children}<RotateNotice /></div>;
 
 export default function App() {
   const urlRoom = useMemo(() => (new URLSearchParams(location.search).get('room') || '').toUpperCase().slice(0, 4), []);
@@ -73,6 +83,8 @@ export default function App() {
   const [user, setUser] = useState<(store.AccountUser & { offline?: boolean }) | null | undefined>(undefined);
   const [evMode, setEvMode] = useState(theme.mode);
   const [daily, setDaily] = useState(() => dailyInfo(new Date()));
+  const cotd = useMemo(() => cotdInfo(new Date()), []);
+  const weekBoss = useMemo(() => weekBossInfo(new Date()), []);
   const [runCfg, setRunCfg] = useState(null);
   const [replay, setReplay] = useState(null);
   const [toast, setToast] = useState('');
@@ -106,6 +118,12 @@ export default function App() {
   }, [refresh]);
   const signedIn = (u: store.AccountUser) => { setUser(u); setName(u.username); setProfile(store.offlineProfile()); refresh(); };
   const signOut = async () => { try { await store.logout(); } catch { /* cookie may already be gone */ } setUser(null); setProfile(store.offlineProfile()); setScreen('menu'); };
+  useEffect(() => { // phones: ask for landscape right away and again on the first tap (some browsers need a gesture)
+    if (!IS_TOUCH) return;
+    lockLandscape();
+    window.addEventListener('pointerdown', lockLandscape, { once: true });
+    return () => window.removeEventListener('pointerdown', lockLandscape);
+  }, []);
   useEffect(() => { loadActivePack(); }, []); // the pack picked last time
 
   const loadout = useMemo(() => loadoutOf(profile), [profile]);
@@ -121,10 +139,10 @@ export default function App() {
     ls.set('cb-name', name);
     const wantMut = kind === 'solo' ? muts : [];
     let cfg;
-    try { const r = await store.startRun(kind, wantMut); cfg = { kind, seed: r.seed, mut: r.mut, event: r.event, runId: r.runId }; }
+    try { const r = await store.startRun(kind, wantMut); cfg = { kind, seed: r.seed, mut: r.mut, event: r.event, runId: r.runId, weekly: r.weekly ? { boss: r.weekly.boss, rule: r.weekly.rule } : null, cotd: cotd.index }; }
     catch { // offline: still playable, just not recorded
       const d = dailyInfo(new Date());
-      cfg = { kind, seed: kind === 'daily' ? d.seed : null, mut: kind === 'daily' ? d.mut : wantMut, event: null, runId: null };
+      cfg = { kind, seed: kind === 'daily' ? d.seed : kind === 'weekboss' ? weekBoss.seed : null, mut: kind === 'daily' ? d.mut : kind === 'weekboss' ? [] : wantMut, event: null, runId: null, weekly: kind === 'weekboss' ? { boss: weekBoss.boss, rule: weekBoss.rule } : null, cotd: cotd.index };
     }
     runRef.current = cfg.runId; cfgRef.current = cfg;
     setRunCfg(cfg);
@@ -135,16 +153,17 @@ export default function App() {
     const parts = [];
     for (const id of res.unlocked || []) parts.push('🏆 ' + (ACHIEVEMENTS.find((a) => a.id === id)?.name || id));
     if (res.dailyDone) parts.push('⭐ Daily complete: +🔑 ' + res.dailyReward);
+    if (res.weekBossDone) parts.push('🗓 Weekly boss beaten: +🔑 ' + res.weekBossReward);
     if ((res.goalsDone || []).length) parts.push('🎯 Weekly goal done');
     if (res.levelUp) parts.push('⬆ Level up!');
     if (parts.length) showToast(parts.join('  ·  '));
   }, [showToast]);
-  const onRunEnd = useCallback(({ keys, wave, over, score, kills, stats }) => {
+  const onRunEnd = useCallback(({ keys, wave, over, score, kills, stats, won }) => {
     const id = runRef.current;
     runRef.current = null;
     const cfg = cfgRef.current;
     if (over && cfg) store.startRun(cfg.kind, cfg.mut).then((r) => { runRef.current = r.runId; }).catch(() => {}); // the player may restart
-    if (id) store.endRun(id, { keys, wave, score, kills, stats, name: nameRef.current }).then((j) => { setProfile(j.profile); announce(j.result); }).catch(() => {});
+    if (id) store.endRun(id, { keys, wave, score, kills, stats, won, name: nameRef.current }).then((j) => { setProfile(j.profile); announce(j.result); }).catch(() => {});
   }, [announce]);
   const onSaveReplay = useCallback(async (rec) => {
     try { await saveReplay(rec); showToast('💾 Replay saved: find it under Replays'); } catch { showToast('Could not save the replay'); }
@@ -284,12 +303,25 @@ export default function App() {
 
   const doneToday = profile.life.lastDaily === daily.id;
   const newAch = (profile.achNew || []).length;
+  const bestRating = Math.max(...['solo', 'online', 'daily', 'rush'].map((m) => ratingOf(profile.rec?.[m] || { top: [] })));
   return (
-    <Shell>
+    <Shell menu>
       <Attract />
-      <div className="card menu">
-        <h1>🐔 Chicken Blasters</h1>
-        <p className="sub">Original co-op space shooter · Signed in as <b>{user.username}</b>{!user.offline && <> · <button className="linklike" onClick={signOut}>Sign out</button></>}</p>
+      <main className="mm">
+        <header className="mm-top">
+          <div className="mm-brand">
+            <h1>🐔 Chicken Blasters</h1>
+            <p className="sub">Original co-op space shooter</p>
+          </div>
+          <div className="mm-user">
+            <div className="chiprow">
+              <Keys n={profile.keys} />
+              <span className="keychip rating" title="Average of your best five runs">★ {bestRating}</span>
+              <span className="keychip lvl" title={`${lv.into} / ${lv.need} XP`}>Lv {lv.level}{profile.title ? ' · ' + profile.title : ''}</span>
+            </div>
+            <span className="sub mm-who">Signed in as <b>{user.username}</b>{!user.offline && <> · <button className="linklike" onClick={signOut}>Sign out</button></>}</span>
+          </div>
+        </header>
 
         {packOffer && (
           <div className="packoffer">
@@ -299,75 +331,87 @@ export default function App() {
           </div>
         )}
 
-        <label>Pilot name <input value={name} maxLength={14} onChange={(e) => setName(e.target.value)} /></label>
-
-        <div className="hangar">
-          <ShipView opts={shipOpts(loadout)} />
-          <div className="hangar-opts">
-            <div className="chiprow">
-              <Keys n={profile.keys} />
-              <span className="keychip rating" title="Average of your best five runs">★ {Math.max(...['solo', 'online', 'daily', 'rush'].map((m) => ratingOf(profile.rec?.[m] || { top: [] })))}</span>
-              <span className="keychip lvl" title={`${lv.into} / ${lv.need} XP`}>Lv {lv.level}{profile.title ? ' · ' + profile.title : ''}</span>
-            </div>
-            {profile.pending > 0 && <button className="small" disabled={!!profile.offline} onClick={() => store.claim().then((r) => setProfile(r.profile)).catch(() => {})}>Claim 🔑 {profile.pending}</button>}
-            <div className="menugrid">
-              <button className="ghost" onClick={() => setScreen('shop')}>🛒 Shop</button>
-              <button className="ghost" onClick={() => setScreen('board')}>🏅 Leaderboard</button>
-              <button className="ghost" onClick={() => setScreen('ach')}>🏆 Goals{newAch ? <b className="badge">{newAch}</b> : null}</button>
-              <button className="ghost" onClick={() => setScreen('packs')}>🎨 Packs</button>
-              <button className="ghost" onClick={() => setScreen('replays')}>⏪ Replays</button>
-              <button className="ghost" onClick={() => setScreen('settings')}>⚙ Settings</button>
-              <button className="ghost" disabled={!!user.offline} onClick={() => setScreen('gift')}>🎁 Gift card</button>
-              {user.admin && <button className="ghost" onClick={() => setScreen('admin')}>🛠 Admin</button>}
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <span className="sub tiny">Choose your role (used in solo and co-op)</span>
-          <div className="roles">
-            {ROLE_IDS.map((id) => (
-              <button key={id} className={'rolecard' + (role === id ? ' on' : '')} style={{ ['--rc' as any]: ROLES[id].color }} onClick={() => pickRole(id)}>
-                <span className="rolebadge" style={{ background: ROLES[id].color }}>{ROLES[id].icon}</span>
-                <b>{ROLES[id].name}</b>
-                <span className="sub tiny">{ROLES[id].desc}</span>
+        <div className="mm-body">
+          <section className="mm-col mm-play" aria-label="Play">
+            <h2 className="mm-h">Play</h2>
+            <div className="playbox big">
+              <button className="mm-primary" onClick={() => startRun('solo')}>
+                Single player{muts.length ? ` (${muts.length} rule${muts.length === 1 ? '' : 's'})` : ''}
+                <small>Fly solo through endless waves and bosses</small>
               </button>
-            ))}
-          </div>
-        </div>
+              <button className="alt" onClick={() => startRun('daily')} title="Same seeded run for everyone today">
+                ⭐ Daily challenge{doneToday ? ' ✓' : ''}
+                <small>{daily.mut.map((m) => MUTATORS[m].name).join(' + ')} · {doneToday ? 'reward claimed today' : '+🔑 ' + daily.reward + ' reward'}</small>
+              </button>
+              <button className="alt2" onClick={() => startRun('rush')} title="Fight the bosses back to back">
+                👑 Boss rush<small>Only bosses, one after another</small>
+              </button>
+              <button className="alt3" onClick={() => startRun('weekboss')} title="One boss and one special rule for the whole week">
+                🗓 Weekly boss: {BOSS_NAMES[weekBoss.boss]}{profile.life.lastWeekBoss === weekBoss.id ? ' ✓' : ''}
+                <small>{weekBoss.ruleName}: {weekBoss.ruleDesc} {profile.life.lastWeekBoss === weekBoss.id ? '· reward claimed this week' : '· +🔑 ' + weekBoss.reward + ' for the first win'}</small>
+              </button>
+            </div>
+            <div className="cotd" title="Kills of this costume score +50 all day">
+              <span className="cotd-icon">{cotd.icon}</span>
+              <div><b>Chicken of the day: {cotd.name}</b><span className="sub tiny">{cotd.fact} Shoot the ★ chickens wearing this costume for +{cotd.bonus} each.</span></div>
+            </div>
+            <details className="muts">
+              <summary>Mutators for single player ({mutBonusText(muts.length)})</summary>
+              <MutatorChips value={muts} onChange={pickMuts} />
+              <p className="sub tiny">Each rule makes the run harder and pays more. Daily challenge rules are fixed for the day.</p>
+            </details>
+            <EventBar mode={evMode} onPick={pickEvent} />
 
-        <EventBar mode={evMode} onPick={pickEvent} />
+            <h2 className="mm-h">Co-op online</h2>
+            <div className="playbox two">
+              <button onClick={quickPlay}>⚡ Quick play</button>
+              <button className="ghost" onClick={() => setScreen('rooms')}>Rooms &amp; create</button>
+            </div>
+            {urlRoom && <p className="sub">Invited to room <b>{urlRoom}</b> — tap Join.</p>}
+            <div className="row">
+              <input placeholder="ROOM CODE" value={code} maxLength={4} onChange={(e) => setCode(e.target.value.toUpperCase())} />
+              <button disabled={code.length !== 4} onClick={joinByCode}>Join</button>
+            </div>
+            {lan.length > 0 && <p className="sub">LAN address: {lan.join('  ')}</p>}
+          </section>
 
-        <div className="playbox">
-          <button onClick={() => startRun('solo')}>Single player{muts.length ? ` (${muts.length} rule${muts.length === 1 ? '' : 's'})` : ''}</button>
-          <button className="alt" onClick={() => startRun('daily')} title="Same seeded run for everyone today">
-            ⭐ Daily challenge{doneToday ? ' ✓' : ''}
-            <small>{daily.mut.map((m) => MUTATORS[m].name).join(' + ')} · {doneToday ? 'reward claimed today' : '+🔑 ' + daily.reward + ' reward'}</small>
-          </button>
-          <button className="alt2" onClick={() => startRun('rush')} title="Fight the bosses back to back">
-            👑 Boss rush<small>Only bosses, one after another</small>
-          </button>
-        </div>
-        <details className="muts">
-          <summary>Mutators for single player ({mutBonusText(muts.length)})</summary>
-          <MutatorChips value={muts} onChange={pickMuts} />
-          <p className="sub tiny">Each rule makes the run harder and pays more. Daily challenge rules are fixed for the day.</p>
-        </details>
+          <section className="mm-col mm-pilot" aria-label="Pilot">
+            <h2 className="mm-h">Your pilot</h2>
+            <div className="mm-ship">
+              <ShipView opts={shipOpts(loadout)} size={170} />
+              <label>Pilot name <input value={name} maxLength={14} onChange={(e) => setName(e.target.value)} /></label>
+              {profile.pending > 0 && <button className="small" disabled={!!profile.offline} onClick={() => store.claim().then((r) => setProfile(r.profile)).catch(() => {})}>Claim 🔑 {profile.pending}</button>}
+            </div>
+            <span className="sub tiny">Choose your role (used in solo and co-op)</span>
+            <div className="roles">
+              {ROLE_IDS.map((id) => (
+                <button key={id} className={'rolecard' + (role === id ? ' on' : '')} style={{ ['--rc' as any]: ROLES[id].color }} onClick={() => pickRole(id)}>
+                  <span className="rolebadge" style={{ background: ROLES[id].color }}>{ROLES[id].icon}</span>
+                  <b>{ROLES[id].name}</b>
+                  <span className="sub tiny">{ROLES[id].desc}</span>
+                </button>
+              ))}
+            </div>
+          </section>
 
-        <hr />
-        <div className="playbox two">
-          <button onClick={quickPlay}>⚡ Quick play</button>
-          <button className="ghost" onClick={() => setScreen('rooms')}>Rooms &amp; create</button>
+          <nav className="mm-col mm-nav" aria-label="More">
+            <h2 className="mm-h">Menu</h2>
+            <div className="menugrid">
+              <button className="ghost" onClick={() => setScreen('shop')}><span className="mi">🛒</span>Shop</button>
+              <button className="ghost" onClick={() => setScreen('board')}><span className="mi">🏅</span>Leaderboard</button>
+              <button className="ghost" onClick={() => setScreen('ach')}><span className="mi">🏆</span>Goals{newAch ? <b className="badge">{newAch}</b> : null}</button>
+              <button className="ghost" onClick={() => setScreen('packs')}><span className="mi">🎨</span>Packs</button>
+              <button className="ghost" onClick={() => setScreen('replays')}><span className="mi">⏪</span>Replays</button>
+              <button className="ghost" onClick={() => setScreen('settings')}><span className="mi">⚙</span>Settings</button>
+              <button className="ghost" disabled={!!user.offline} onClick={() => setScreen('gift')}><span className="mi">🎁</span>Gift card</button>
+              {user.admin && <button className="ghost" onClick={() => setScreen('admin')}><span className="mi">🛠</span>Admin</button>}
+              <button className="ghost" onClick={toggleFullscreen}><span className="mi">⛶</span>Full screen</button>
+            </div>
+            <p className="sub tiny">Keyboard: WASD / arrows + Space · Ability: E / Shift / right-click · Mouse: move to steer, hold left button to fire · F fullscreen · M mute · P pause · Esc leave · Touch: drag on the left half of the screen to steer</p>
+            <p className="sub tiny">Co-op: fly over a downed teammate for 1.5s to revive them (medics are twice as fast).</p>
+          </nav>
         </div>
-        {urlRoom && <p className="sub">Invited to room <b>{urlRoom}</b> — tap Join.</p>}
-        <div className="row">
-          <input placeholder="ROOM CODE" value={code} maxLength={4} onChange={(e) => setCode(e.target.value.toUpperCase())} />
-          <button disabled={code.length !== 4} onClick={joinByCode}>Join</button>
-        </div>
-        {lan.length > 0 && <p className="sub">LAN address: {lan.join('  ')}</p>}
-        <p className="sub tiny">Keyboard: WASD / arrows + Space · Ability: E / Shift / right-click · Mouse: move to steer, hold left button to fire · F fullscreen · M mute · P pause · Esc leave · Touch: drag on the left half of the screen to steer</p>
-        <p className="sub tiny">Co-op: fly over a downed teammate for 1.5s to revive them (medics are twice as fast).</p>
-      </div>
+      </main>
       {toastEl}
     </Shell>
   );

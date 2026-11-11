@@ -66,7 +66,7 @@ const num = (v, max = 1e9) => (Number.isFinite(Number(v)) ? Math.min(max, Math.m
 
 export const defaultProgress = () => ({
   xp: 0, title: '', ach: {}, achNew: [],
-  life: { runs: 0, kills: 0, bosses: 0, keys: 0, flawless: 0, novas: 0, dailies: 0, streak: 0, lastDaily: '' },
+  life: { runs: 0, kills: 0, bosses: 0, keys: 0, flawless: 0, novas: 0, dailies: 0, streak: 0, lastDaily: '', lastWeekBoss: '' },
   weekly: { id: '', prog: {}, done: [], claimed: [] },
   season: { id: '', stars: 0, claimed: [] },
 });
@@ -80,7 +80,8 @@ export function sanitizeProgress(raw) {
   d.achNew = (Array.isArray(r.achNew) ? r.achNew : []).filter((id) => d.ach[id]).slice(0, 40);
   const titles = new Set(ACHIEVEMENTS.filter((a) => a.title && d.ach[a.id]).map((a) => a.title));
   d.title = titles.has(r.title) ? r.title : '';
-  for (const k of Object.keys(d.life)) if (k !== 'lastDaily') d.life[k] = num(r.life?.[k]);
+  for (const k of Object.keys(d.life)) if (k !== 'lastDaily' && k !== 'lastWeekBoss') d.life[k] = num(r.life?.[k]);
+  d.life.lastWeekBoss = /^\d{4}-W\d{2}$/.test(String(r.life?.lastWeekBoss)) ? String(r.life.lastWeekBoss) : '';
   d.life.lastDaily = /^\d{4}-\d{2}-\d{2}$/.test(String(r.life?.lastDaily)) ? String(r.life.lastDaily) : '';
   const w = r.weekly && typeof r.weekly === 'object' ? r.weekly : {};
   d.weekly.id = /^\d{4}-W\d{2}$/.test(String(w.id)) ? String(w.id) : '';

@@ -9,6 +9,7 @@ import { pack } from './packs';
 import { theme } from './theme';
 import { settings, STICK_PX } from './settings';
 import { screenTilt, tiltToTarget, gyroSupport } from './gyro';
+import { EMOTES, showEmote, clearEmotes } from './emotes';
 
 const KEYS = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
@@ -93,7 +94,8 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
   const amb = useRef<HTMLCanvasElement>(null); // blurred colour wash that fills the screen around the 4:3 play field
   const stage = useRef(null);
   const skillRef = useRef(null);
-  const api = useRef<{ apply: (patch: Record<string, any>) => void; restartReplay: () => void }>({ apply: () => {}, restartReplay: () => {} });
+  const api = useRef<{ apply: (patch: Record<string, any>) => void; restartReplay: () => void; emote: (i: number) => void }>({ apply: () => {}, restartReplay: () => {}, emote: () => {} });
+  const [emoteOpen, setEmoteOpen] = useState(false);
   const runEnd = useRef(onRunEnd);
   runEnd.current = onRunEnd;
   const saveRef = useRef(onSaveReplay);
@@ -122,7 +124,7 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
     const cfg = JSON.parse(runKey);
     const autoFire = settings.autoFire && !isReplay && !isSpectate;
 
-    resetFx();
+    resetFx(); clearEmotes();
     sfx.init();
     sfx.setEvent(theme.event);
     if (!isReplay) sfx.startMusic();
@@ -131,12 +133,12 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
     const startWave = single ? Math.max(1, Number(new URLSearchParams(location.search).get('wave')) || 1) : 1;
     const fresh = () => {
       const seed = cfg.seed ?? ((Math.random() * 1e9) >>> 0);
-      const opts = { mut: cfg.mut, rush: cfg.kind === 'rush', daily: cfg.kind === 'daily', event: cfg.event ?? null };
+      const opts = { mut: cfg.mut, rush: cfg.kind === 'rush', daily: cfg.kind === 'daily', event: cfg.event ?? null, weekly: cfg.weekly ?? null, cotd: cfg.cotd ?? null };
       s = createState(seed, opts);
       s.wave = startWave - 1; s.cleared = s.wave > 0;
       addPlayer(s, 'me', name || 'You', JSON.parse(loadKey));
       resetFx(); ticks = 0;
-      recRef.current = newReplay({ seed, mut: s.mut, rush: s.rush, daily: s.daily, event: s.ev, startWave: s.wave, name: name || 'You', loadout: JSON.parse(loadKey) });
+      recRef.current = newReplay({ seed, mut: s.mut, rush: s.rush, daily: s.daily, event: s.ev, startWave: s.wave, name: name || 'You', loadout: JSON.parse(loadKey), weekly: s.weekly, cotd: s.cotd });
       setOverInfo(null);
     };
 
@@ -173,7 +175,7 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
       const keys = me0?.keys || 0, score = me0?.score || 0;
       if (!s.over && keys === 0 && score === 0) return;
       reported = true;
-      runEnd.current?.({ keys, wave: s.wave, over: !!s.over, score, kills: me0?.kills || 0, stats: me0?.st, kind: cfg.kind || 'solo', rec: recRef.current });
+      runEnd.current?.({ keys, wave: s.wave, over: !!s.over, score, kills: me0?.kills || 0, stats: me0?.st, kind: cfg.kind || 'solo', won: !!s.won, rec: recRef.current });
     };
 
     const readOnly = isReplay || isSpectate;
@@ -194,8 +196,16 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
       // pressing a movement key hands steering back from the mouse to the keyboard
       api.current.apply(v && k !== 'fire' && k !== 'ab' ? { [k]: v, tx: null, ty: null } : { [k]: v });
     };
+    const sendEmote = (i) => {
+      const id = EMOTES[i]?.id;
+      if (!id || readOnly) return;
+      if (single) showEmote('me', id); else net.send({ t: 'emote', id });
+    };
+    api.current.emote = sendEmote;
     const down = (e) => {
       sfx.init();
+      const ei = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].indexOf(e.code);
+      if (ei >= 0) sendEmote(ei);
       if (e.code === 'Escape') return onExit();
       if (e.code === 'KeyM') { const m = !sfx.isMuted(); sfx.setMuted(m); setMuted(m); }
       if (e.code === 'KeyF') toggleFullscreen();
@@ -389,10 +399,16 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
         {isSpectate && <span className="ping">👁 Spectating</span>}
         {touchPlay && gyroSupport() !== 'unsupported' && <button className={gyroOn ? 'on' : ''} onClick={toggleGyro} aria-label="Gyroscope steering">🧭</button>}
         {gyroOn && <button onClick={() => { recenter.current = true; }} aria-label="Recentre gyroscope">⟲</button>}
+        {!isReplay && !isSpectate && <button className={emoteOpen ? 'on' : ''} onClick={() => setEmoteOpen((o) => !o)} aria-label="Emotes" title="Emotes (keys 1-5)">😀</button>}
         <button onClick={toggleMute} aria-label="Toggle sound">{muted ? '🔇' : '🔊'}</button>
         <button onClick={toggleFullscreen} aria-label="Fullscreen">⛶</button>
         <button onClick={onExit} aria-label="Leave">✕</button>
       </div>
+      {emoteOpen && !isReplay && !isSpectate && (
+        <div className="emotebar">
+          {EMOTES.map((e, i) => <button key={e.id} title={`${e.label} (key ${i + 1})`} aria-label={e.label} onClick={() => { api.current.emote(i); setEmoteOpen(false); }}>{e.icon}</button>)}
+        </div>
+      )}
       {gyroNote && (
         <div className="gyronote">
           {gyroNote.text}{gyroNote.link && <> <a href={gyroNote.link}>Open secure version</a></>}

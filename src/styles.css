@@ -257,3 +257,75 @@ details.muts summary { cursor: pointer; font-size: 13px; }
 .shop.admin td.acts { display: flex; gap: 6px; }
 .shop.admin td .row { display: flex; gap: 6px; }
 .shop.admin td .row input { width: 140px; }
+
+
+/* =====================  full-screen main menu (desktop and mobile)  ===================== */
+.shell.menu-shell { padding: 0; display: block; height: 100dvh; min-height: 100dvh; overflow: hidden; }
+.mm { position: relative; z-index: 1; width: 100%; height: 100dvh; display: flex; flex-direction: column; gap: 12px; overflow: hidden;
+  padding: max(14px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(18px, env(safe-area-inset-left));
+  background: linear-gradient(180deg, rgba(5, 8, 26, .25), rgba(5, 8, 26, .72)); }
+.mm-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; flex: none; }
+.mm-brand h1 { font-size: clamp(22px, 3.2vw, 40px); letter-spacing: .5px; text-shadow: 0 2px 20px rgba(255, 179, 0, .35); }
+.mm-user { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.mm-who { word-break: normal; }
+.mm .packoffer { flex: none; }
+.mm-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.15fr 1fr .8fr; gap: 14px; }
+.mm-col { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 16px; background: rgba(14, 20, 50, .82); backdrop-filter: blur(6px); border: 1px solid #283593; border-radius: 14px; overscroll-behavior: contain; }
+.mm-h { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: #9fa8da; font-weight: 700; }
+.mm-col .mm-h:not(:first-child) { margin-top: 8px; }
+.playbox.big button { padding: 16px 14px; font-size: clamp(16px, 1.5vw, 20px); text-align: left; }
+.playbox.big button small { font-size: 12px; }
+.mm-primary { background: linear-gradient(135deg, #ffb300, #ff8f00); }
+.mm-ship { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.mm-ship label { width: 100%; }
+.mm-ship .preview { width: 170px; height: 170px; }
+.mm .menugrid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.mm .menugrid button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px; font-size: 14px; }
+.mm .menugrid .mi { font-size: 22px; line-height: 1; }
+.mm .roles { grid-template-columns: repeat(2, 1fr); }
+.mm .rolecard .sub { font-size: 11px; }
+
+/* tablets / narrow desktop windows: stack the columns and let the page scroll */
+@media (max-width: 860px) and (min-height: 521px) {
+  .shell.menu-shell { height: auto; min-height: 100dvh; overflow-y: auto; }
+  .mm { height: auto; min-height: 100dvh; overflow: visible; }
+  .mm-body { display: flex; flex-direction: column; }
+  .mm-col { overflow: visible; }
+  .mm .menugrid { grid-template-columns: repeat(3, 1fr); }
+}
+/* phones held sideways: keep three compact columns that each scroll */
+@media (max-height: 520px) {
+  .mm { gap: 6px; padding-top: max(8px, env(safe-area-inset-top)); padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .mm-brand h1 { font-size: 20px; }
+  .mm-brand .sub { display: none; }
+  .mm-body { gap: 8px; grid-template-columns: 1.25fr 1fr .75fr; }
+  .mm-col { padding: 10px; gap: 8px; }
+  .playbox.big button { padding: 9px 10px; font-size: 15px; }
+  .mm-ship .preview { width: 96px; height: 96px; }
+  .mm .menugrid button { padding: 7px 4px; font-size: 12px; }
+  .mm .menugrid .mi { font-size: 17px; }
+  .mm .rolecard .sub { display: none; }
+  .mm-nav .sub.tiny { display: none; }
+}
+
+/* touch phones held upright: ask the player to turn the phone (the game is landscape-only) */
+.rotate-notice { display: none; }
+@media (orientation: portrait) and (pointer: coarse) and (max-width: 900px) {
+  .rotate-notice { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: #05081a; text-align: center; padding: 24px; font-size: 20px; }
+  .rotate-notice span { font-size: 14px; opacity: .7; }
+  .rn-phone { width: 54px; height: 92px; border: 4px solid #ffb300; border-radius: 10px; margin-bottom: 10px; animation: rn-rot 2.6s ease-in-out infinite; }
+}
+@keyframes rn-rot { 0%, 25% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+
+.mm .sub, .mm .rolecard .sub { word-break: normal; overflow-wrap: anywhere; }
+
+/* ---- team emotes ---- */
+.emotebar { position: absolute; top: 84px; right: 8px; z-index: 7; display: flex; gap: 6px; padding: 6px 8px; border-radius: 999px; background: rgba(8, 12, 40, .92); border: 1px solid rgba(120, 150, 255, .5); }
+.emotebar button { width: 40px; height: 40px; padding: 0; border-radius: 50%; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .2); font-size: 20px; }
+@media (min-aspect-ratio: 16/10) { .emotebar { top: 52px; } }
+
+/* ---- weekly boss + chicken of the day (menu) ---- */
+.playbox .alt3 { background: linear-gradient(135deg, #00acc1, #5c6bc0); color: #fff; }
+.cotd { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255, 213, 79, .5); background: rgba(255, 213, 79, .08); }
+.cotd-icon { font-size: 34px; line-height: 1; flex: none; }
+.cotd > div { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }

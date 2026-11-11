@@ -1,6 +1,7 @@
 // Thin WebSocket client for the multiplayer game server. `state` always holds the latest server snapshot.
 // The browser first asks the website for a short-lived token (proves who you are) and the game server's address.
 import { wsToken } from './profile';
+import { showEmote } from './emotes';
 
 interface Handlers {
   onOpen?: (net: Net) => void;
@@ -43,6 +44,8 @@ export function connect({ onOpen, onMessage, onClose }: Handlers): Net {
       if (m.t === 'state') {
         net.state = m.s;
         net.onState?.(m.s);
+      } else if (m.t === 'emote') {
+        showEmote(m.pid, m.id);
       } else if (m.t === 'pong') {
         const sample = performance.now() - m.ts;
         net.rtt = net.rtt == null ? sample : net.rtt * 0.6 + sample * 0.4;

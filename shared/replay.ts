@@ -5,7 +5,7 @@ import { createState, addPlayer, setInput, step, emptyInput, SIM_VERSION } from 
 export const REPLAY_FORMAT = 1;
 export const MAX_REPLAY_TICKS = 60 * 60 * 20; // 20 minutes
 
-/** meta: { seed, mut, rush, daily, event, startWave, name, loadout }. */
+/** meta: { seed, mut, rush, daily, event, startWave, name, loadout, weekly, cotd }. */
 export function newReplay(meta) {
   return { format: REPLAY_FORMAT, ver: SIM_VERSION, meta: { ...meta }, inputs: [], ticks: 0, score: 0, wave: 0, when: Date.now(), _last: '' };
 }
@@ -35,6 +35,8 @@ export function sanitizeReplay(raw) {
     format: REPLAY_FORMAT, ver: SIM_VERSION,
     meta: {
       seed: n(m.seed, 4294967295), mut: Array.isArray(m.mut) ? m.mut.map(String).slice(0, 8) : [], rush: !!m.rush, daily: !!m.daily,
+      weekly: m.weekly && typeof m.weekly === 'object' ? { boss: String(m.weekly.boss).slice(0, 12), rule: String(m.weekly.rule).slice(0, 12) } : null,
+      cotd: Number.isInteger(m.cotd) && m.cotd >= 0 && m.cotd < 10 ? m.cotd : null,
       event: typeof m.event === 'string' ? m.event.slice(0, 12) : null, startWave: n(m.startWave, 999),
       name: String(m.name || 'Pilot').slice(0, 14), loadout: m.loadout && typeof m.loadout === 'object' ? m.loadout : {},
     },
@@ -45,7 +47,7 @@ export function sanitizeReplay(raw) {
 /** Builds the starting state of a replay. */
 export function replayStart(rep) {
   const m = rep.meta;
-  const s = createState(m.seed, { mut: m.mut, rush: m.rush, daily: m.daily, event: m.event });
+  const s = createState(m.seed, { mut: m.mut, rush: m.rush, daily: m.daily, event: m.event, weekly: m.weekly, cotd: m.cotd });
   s.wave = m.startWave || 0; s.cleared = s.wave > 0;
   addPlayer(s, 'me', m.name, m.loadout);
   return s;
