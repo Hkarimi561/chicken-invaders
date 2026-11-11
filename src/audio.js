@@ -18,6 +18,30 @@ export function init() {
   if (ac.state === 'suspended') ac.resume();
 }
 export const isMuted = () => muted;
+
+// ----- resource-pack sounds replace the synthesised ones when present -----
+let packSounds = {};
+export function setPackSounds(map) { packSounds = map || {}; }
+export async function decodeBuffer(arrayBuffer) { init(); return ac.decodeAudioData(arrayBuffer); }
+export async function decodeDataUrl(src) { const r = await fetch(src); return decodeBuffer(await r.arrayBuffer()); }
+function playPack(name, vol = 0.5) {
+  const b = packSounds[name];
+  if (!b || !ac || muted) return false;
+  const src = ac.createBufferSource(); src.buffer = b;
+  const g = ac.createGain(); g.gain.value = vol;
+  src.connect(g); g.connect(master); src.start();
+  return true;
+}
+
+// ----- seasonal flavour for the background arpeggio -----
+let eventId = null;
+export function setEvent(id) { eventId = id; }
+const EVENT_NORMAL = {
+  halloween: [0, 3, 7, 3, -2, 3, 8, 3],
+  christmas: [0, 4, 7, 12, 7, 4, 7, 2],
+  valentine: [0, 4, 7, 9, 7, 4, 9, 12],
+  nowruz: [0, 2, 7, 9, 7, 2, 12, 9],
+};
 export function setMuted(m) { muted = m; if (master) master.gain.value = m ? 0 : 0.35; }
 export const setBoss = (b) => { boss = b; };
 
@@ -54,6 +78,7 @@ function noise({ dur = 0.2, vol = 0.2, freq = 1200, q = 0.8, type = 'bandpass', 
 export function shoot(weapon, own) {
   if (!ok('shoot' + weapon + (own ? 1 : 0), weapon === 'pulse' ? 0.05 : 0.07)) return;
   const v = own ? 1 : 0.4;
+  if (playPack('shoot', 0.6 * v)) return;
   if (weapon === 'pulse') tone({ f: 1300, f2: 800, type: 'triangle', dur: 0.05, vol: 0.09 * v });
   else if (weapon === 'laser') tone({ f: 1700, f2: 300, type: 'sawtooth', dur: 0.14, vol: 0.07 * v });
   else if (weapon === 'scatter') { noise({ dur: 0.18, vol: 0.2 * v, freq: 900 }); tone({ f: 140, f2: 60, type: 'square', dur: 0.16, vol: 0.14 * v }); }
@@ -64,23 +89,27 @@ export function shoot(weapon, own) {
 }
 export function kill(isBoss) {
   if (!ok(isBoss ? 'bosskill' : 'kill', isBoss ? 0.5 : 0.04)) return;
+  if (playPack('kill', isBoss ? 0.9 : 0.5)) return;
   noise({ dur: isBoss ? 0.9 : 0.16, vol: isBoss ? 0.35 : 0.14, freq: isBoss ? 300 : 1800 });
   tone({ f: isBoss ? 260 : 520, f2: 60, type: 'sawtooth', dur: isBoss ? 0.9 : 0.14, vol: isBoss ? 0.25 : 0.1 });
   if (!isBoss) tone({ f: 800, f2: 1200, type: 'sine', dur: 0.06, vol: 0.04 }); // cluck-ish chirp
 }
 export function hit(own) {
   if (!ok('hit', 0.1)) return;
+  if (playPack('hit', own ? 0.8 : 0.4)) return;
   noise({ dur: 0.4, vol: own ? 0.35 : 0.18, freq: 400, type: 'lowpass' });
   tone({ f: 200, f2: 40, type: 'square', dur: 0.35, vol: own ? 0.25 : 0.1 });
 }
 export function gift(kind) {
   if (!ok('gift', 0.08)) return;
+  if (playPack('gift', 0.6)) return;
   const notes = kind === 'key' ? [988, 1319, 1760] : kind === 'life' ? [660, 990] : kind === 'wpn' ? [440, 660, 880, 1320] : [660, 880, 1100];
   notes.forEach((f, i) => tone({ f, type: 'triangle', dur: 0.12, vol: 0.12, delay: i * 0.06 }));
 }
 export function revive() { if (ok('revive', 0.3)) [392, 523, 659, 784].forEach((f, i) => tone({ f, type: 'sine', dur: 0.18, vol: 0.14, delay: i * 0.07 })); }
 export function wave(isBoss) {
   if (!ok('wave', 0.5)) return;
+  if (playPack('wave', 0.7)) return;
   if (isBoss) [110, 110, 98].forEach((f, i) => tone({ f, f2: f * 0.8, type: 'sawtooth', dur: 0.35, vol: 0.22, delay: i * 0.3 }));
   else [392, 494, 587].forEach((f, i) => tone({ f, type: 'square', dur: 0.14, vol: 0.09, delay: i * 0.09 }));
 }
@@ -88,6 +117,7 @@ export function flawless() { if (ok('flaw', 0.5)) [523, 659, 784, 1047].forEach(
 export function gameOver() { if (ok('over', 1)) [440, 392, 330, 262].forEach((f, i) => tone({ f, type: 'sawtooth', dur: 0.35, vol: 0.14, delay: i * 0.25 })); }
 
 let lastBeat = 0;
+let musicSrc = null;
 /** 1 right on a beat, decaying to 0 over ~0.4s. */
 export const getBeat = () => Math.max(0, 1 - (performance.now() - lastBeat) / 400);
 export function combo(n) {
@@ -105,14 +135,18 @@ const NORMAL = [0, 7, 12, 7, 3, 10, 15, 10];
 const BOSS = [0, 0, 12, 0, -2, -2, 10, -2];
 export function startMusic() {
   if (musicTimer) return;
+  if (packSounds.music && ac) { // a pack's own track replaces the synthesised arpeggio (the timer keeps driving beat visuals)
+    musicSrc = ac.createBufferSource(); musicSrc.buffer = packSounds.music; musicSrc.loop = true;
+    const g = ac.createGain(); g.gain.value = 0.7; musicSrc.connect(g); g.connect(master); musicSrc.start();
+  }
   musicTimer = setInterval(() => {
     if (step % 2 === 0) lastBeat = performance.now(); // drives beat-reactive visuals even when muted
-    if (!ac || muted) { step++; return; }
-    const seq = boss ? BOSS : NORMAL;
+    if (!ac || muted || musicSrc) { step++; return; }
+    const seq = boss ? BOSS : EVENT_NORMAL[eventId] || NORMAL;
     const semi = seq[step++ % seq.length];
     const f = 110 * 2 ** (semi / 12);
     tone({ f, type: boss ? 'sawtooth' : 'triangle', dur: 0.2, vol: boss ? 0.07 : 0.05 });
     if (step % 4 === 0) noise({ dur: 0.05, vol: 0.04, freq: 6000, type: 'highpass' });
   }, 210);
 }
-export function stopMusic() { clearInterval(musicTimer); musicTimer = null; }
+export function stopMusic() { clearInterval(musicTimer); musicTimer = null; if (musicSrc) { try { musicSrc.stop(); } catch { /* already stopped */ } musicSrc = null; } }

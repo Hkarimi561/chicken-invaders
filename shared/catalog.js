@@ -1,6 +1,8 @@
 // Shop catalog + pure profile logic. Shared by the server (authoritative) and the client (display).
+import { EVENTS } from './events.js';
+
 export const PALETTE = ['#4fc3f7', '#ff8a65', '#aed581', '#ce93d8', '#ffd54f', '#f06292'];
-export const SKINS = ['plain', 'stripes', 'flames', 'camo', 'checker', 'gold', 'neon', 'ghost', 'dragon', 'galaxy'];
+export const SKINS = ['plain', 'stripes', 'flames', 'camo', 'checker', 'gold', 'neon', 'ghost', 'dragon', 'galaxy', 'pumpkin', 'frost', 'cupid', 'blossom'];
 export const SHOP_GUN_IDS = ['scatter', 'arc', 'drone'];
 
 export const UPGRADES = {
@@ -29,6 +31,11 @@ export const SKIN_INFO = {
   ghost: { name: 'Phantom', cost: 24, special: true },
   dragon: { name: 'Dragon scale', cost: 35, special: true },
   galaxy: { name: 'Deep galaxy', cost: 35, special: true },
+  // limited-time skins: sold only while their event is running, yours to keep afterwards
+  pumpkin: { name: 'Jack-o-lantern', cost: 20, special: true, event: 'halloween' },
+  frost: { name: 'Frostbite', cost: 20, special: true, event: 'christmas' },
+  cupid: { name: 'Cupid', cost: 20, special: true, event: 'valentine' },
+  blossom: { name: 'Blossom', cost: 20, special: true, event: 'nowruz' },
 };
 
 export const TRAIL_INFO = {
@@ -58,7 +65,7 @@ export const parseItem = (item) => {
 export const upgradeLevel = (p, id) => Math.min(UPGRADES[id]?.costs.length || 0, Math.max(0, Number(p.upgrades?.[id]) || 0));
 
 /** What an item costs right now for this profile, or why it can't be bought. */
-export function quote(p, item) {
+export function quote(p, item, ctx = {}) {
   const { kind, id } = parseItem(item);
   if (kind === 'up') {
     const u = UPGRADES[id];
@@ -67,7 +74,13 @@ export function quote(p, item) {
     return lvl >= u.costs.length ? { error: 'Already at max level' } : { cost: u.costs[lvl], kind, id };
   }
   if (kind === 'gun') return GUNS[id] ? (p.owned.gun.includes(id) ? { error: 'Already owned' } : { cost: GUNS[id].cost, kind, id }) : { error: 'Unknown gun' };
-  if (kind === 'skin') return SKIN_INFO[id] ? (p.owned.skin.includes(id) ? { error: 'Already owned' } : { cost: SKIN_INFO[id].cost, kind, id }) : { error: 'Unknown skin' };
+  if (kind === 'skin') {
+    const info = SKIN_INFO[id];
+    if (!info) return { error: 'Unknown skin' };
+    if (p.owned.skin.includes(id)) return { error: 'Already owned' };
+    if (info.event && ctx.event !== info.event) return { error: 'Only sold during ' + EVENTS[info.event].name };
+    return { cost: info.cost, kind, id };
+  }
   if (kind === 'paint') {
     if (!PALETTE.includes(id) || id === PALETTE[0]) return { error: 'Unknown paint' };
     return p.owned.paint.includes(id) ? { error: 'Already owned' } : { cost: PAINT_COST, kind, id };
@@ -76,8 +89,8 @@ export function quote(p, item) {
   return { error: 'Unknown item' };
 }
 
-export function buyItem(p, item) {
-  const q = quote(p, item);
+export function buyItem(p, item, ctx = {}) {
+  const q = quote(p, item, ctx);
   if (q.error) return { ok: false, error: q.error };
   if (p.keys < q.cost) return { ok: false, error: `Need ${q.cost - p.keys} more key${q.cost - p.keys === 1 ? '' : 's'}` };
   p.keys -= q.cost;

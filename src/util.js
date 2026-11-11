@@ -16,3 +16,7 @@ export function shadowEllipse(ctx, x, y, rx, ry, a = 0.35) {
   ctx.fillStyle = `rgba(0,0,0,${a})`;
   ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, 7); ctx.fill();
 }
+
+/** Render quality: 2 = full effects, 1 = no foreground/lens/glow + cached backdrop + flat chickens, 0 = minimal. Adapts at runtime. */
+export const quality = { level: 2 };
+export const IS_TOUCH = typeof window !== 'undefined' && ('ontouchstart' in window || (navigator.maxTouchPoints || 0) > 0);

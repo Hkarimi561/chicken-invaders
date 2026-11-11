@@ -7,6 +7,7 @@ services:
     environment:
       PORT: "3000"
       DATA_DIR: /data
+      # EVENT_OVERRIDE: halloween   # force a seasonal event (halloween, christmas, valentine, nowruz) for testing
     volumes:
       - profiles:/data  # keeps keys, unlocks and profile codes across restarts
     restart: unless-stopped

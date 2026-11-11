@@ -2,6 +2,8 @@
 import { WebSocket } from 'ws';
 import { createState, addPlayer, step, setInput, emptyInput, PALETTE } from '../shared/sim.js';
 import { defaultProfile, loadoutOf, buyItem, equipItem, quote, sanitizeProfile } from '../shared/catalog.js';
+import { activeEvent, nextEvent } from '../shared/events.js';
+import { sanitizePack, emptyPack } from '../shared/packfmt.js';
 
 const s = createState(42);
 addPlayer(s, 'a', 'A');
@@ -160,6 +162,43 @@ const assert = (c, m) => { if (!c) throw new Error('FAIL: ' + m); };
   const dirty = sanitizeProfile({ keys: -5, pending: 'x', owned: { skin: ['gold', 'hax'], gun: ['nuke'] }, equipped: { skin: 'hax', gun: 'nuke' }, upgrades: { hull: 99, bogus: 3 } });
   assert(dirty.keys === 0 && dirty.pending === 0 && !dirty.owned.skin.includes('hax') && dirty.owned.gun.length === 0 && dirty.equipped.skin === 'plain' && dirty.upgrades.hull === 2 && !('bogus' in dirty.upgrades), 'sanitizeProfile repairs bad data');
 }
+// seasonal events: calendar + limited-time skins
+{
+  const d = (m, day) => new Date(2026, m - 1, day);
+  assert(activeEvent(d(10, 31)) === 'halloween' && activeEvent(d(10, 14)) === null, 'halloween window');
+  assert(activeEvent(d(12, 25)) === 'christmas' && activeEvent(d(1, 2)) === 'christmas' && activeEvent(d(1, 4)) === null, 'winter window wraps the new year');
+  assert(activeEvent(d(2, 10)) === 'valentine' && activeEvent(d(3, 21)) === 'nowruz' && activeEvent(d(7, 4)) === null, 'other events and off-season');
+  const n = nextEvent(d(11, 11));
+  assert(n.id === 'christmas' && n.days === 29, 'next event counts down correctly');
+  const pr = defaultProfile(); pr.keys = 100;
+  assert(!buyItem(pr, 'skin:pumpkin').ok, 'event skin cannot be bought off-season');
+  assert(!buyItem(pr, 'skin:pumpkin', { event: 'christmas' }).ok, 'event skin cannot be bought during a different event');
+  assert(buyItem(pr, 'skin:pumpkin', { event: 'halloween' }).ok && pr.keys === 80, 'event skin can be bought during its event');
+  assert(equipItem(pr, 'skin', 'pumpkin').ok && loadoutOf(pr).skin === 'pumpkin', 'an owned event skin stays equippable afterwards');
+  const t = createState(1); addPlayer(t, 'a', 'A', { skin: 'frost' });
+  assert(t.players.a.skin === 'frost', 'sim accepts event skins');
+}
+
+// resource packs: data only, strictly validated
+{
+  const throws = (fn, why) => { let threw = false; try { fn(); } catch { threw = true; } assert(threw, why); };
+  const png = 'data:image/png;base64,iVBORw0KGgo=';
+  const evil = JSON.parse('{"name":"<b>x</b>","images":{"chicken":"' + png + '","egg":{"src":"' + png + '","scale":99}},"colors":{"accent":"#ABCDEF","bullet":"red","overlayAlpha":5,"vests":["#112233"]},"options":{"pixel":99},"evil":"x","__proto__":{"polluted":1},"constructor":{"prototype":{"polluted":1}}}');
+  const ok = sanitizePack(evil);
+  assert(!ok.name.includes('<') && ok.images.egg.scale === 3 && ok.images.chicken.scale === 1, 'name and image scale are sanitised');
+  assert(ok.colors.accent === '#abcdef' && ok.colors.bullet === null && ok.colors.overlayAlpha === 0.6 && ok.colors.vests[0] === '#112233' && ok.colors.vests[1] === null, 'colours are validated');
+  assert(ok.options.pixel === 6 && !('evil' in ok) && ({}).polluted === undefined, 'unknown keys dropped, no prototype pollution');
+  throws(() => sanitizePack({ images: { chicken: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=' } }), 'SVG images are rejected');
+  throws(() => sanitizePack({ images: { chicken: 'javascript:alert(1)' } }), 'javascript: urls are rejected');
+  throws(() => sanitizePack({ images: { chicken: 'https://example.com/a.png' } }), 'remote urls are rejected');
+  throws(() => sanitizePack({ images: { chicken: 'data:image/png;base64,' + 'A'.repeat(1_000_000) } }), 'oversized images are rejected');
+  throws(() => sanitizePack({ sounds: { shoot: 'data:audio/x-evil;base64,AAAA' } }), 'unknown audio types are rejected');
+  throws(() => sanitizePack('nope'), 'non-objects are rejected');
+  const snd = sanitizePack({ sounds: { shoot: 'data:audio/mpeg;base64,AAAA', bogus: 'data:audio/mpeg;base64,AAAA' } });
+  assert(snd.sounds.shoot && !('bogus' in snd.sounds), 'valid sounds kept, unknown slots dropped');
+  const e = emptyPack('x');
+  assert(JSON.stringify(sanitizePack(e)) === JSON.stringify(e), 'an empty pack round-trips unchanged');
+}
 console.log('sim mechanics ok');
 
 // profile API (needs the server running)
@@ -188,7 +227,8 @@ let pid;
   assert((await call('/api/equip', { id: pid, slot: 'paint', value: PALETTE[2] })).status === 400, 'cannot equip unowned paint');
   assert((await call('/api/equip', { id: pid, slot: 'paint', value: PALETTE[1] })).status === 200, 'equip owned paint');
   assert((await call('/api/profile/' + pid)).body.profile.equipped.paint === PALETTE[1], 'profile persists the loadout');
-  console.log('profile API ok');
+  assert('event' in (await call('/api/info')).body, 'server reports the running event');
+console.log('profile API ok');
 }
 
 const url = `ws://localhost:${process.env.PORT || 3000}/ws`;
@@ -206,5 +246,12 @@ const st = await next(b, (m) => m.t === 'state' && Object.keys(m.s.players).leng
 assert(st.s.players[room.you].color === PALETTE[1], 'multiplayer uses the equipped loadout from the server-side profile');
 b.send(JSON.stringify({ t: 'input', input: { fire: 1, left: 1, tx: 300, ty: 400 } }));
 await next(b, (m) => m.t === 'state' && m.s.bullets.length > 0);
+b.send(JSON.stringify({ t: 'ping', ts: 12345 }));
+const pong = await next(b, (m) => m.t === 'pong');
+assert(pong.ts === 12345, 'server answers ping with the same timestamp');
+b.send(JSON.stringify({ t: 'rtt', ms: 42 }));
+const withPing = await next(a, (m) => m.t === 'state' && Object.values(m.s.players).some((p) => p.ping === 42));
+assert(withPing, "a pilot's measured ping is shared with the room");
+console.log('ping ok');
 console.log('multiplayer ok, room', room.code, 'players', Object.keys(st.s.players).length);
 process.exit(0);

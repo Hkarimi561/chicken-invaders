@@ -1,5 +1,6 @@
 import { W, H } from '../shared/sim.js';
 import { radial, clamp } from './util.js';
+import { getImg } from './packs.js';
 
 // Six themed backdrops; the world changes every 5 waves. `kind` selects extra scenery.
 const WORLDS = [
@@ -184,11 +185,10 @@ function lava(ctx, t, ox, beat) {
 
 // ---------- main background ----------
 let lastT = 0;
-export function drawWorld(ctx, t, wave, env = {}) {
-  const dt = clamp(t - lastT, 0, 0.1); lastT = t;
-  const w = WORLDS[worldIndex(wave)];
-  const px = env.px || 0, beat = env.beat || 0, flare = env.flare || 0;
+const backdrops = new Map(); // cache for quality <= 1: sky/nebula/planet (+ frozen scenery at quality 0)
 
+/** Sky gradient, nebulae, aurora and planet. */
+function paintSky(ctx, t, w, px, beat, flare) {
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, w.sky[0]); g.addColorStop(0.6, w.sky[1]); g.addColorStop(1, w.sky[2]);
   ctx.fillStyle = g; ctx.fillRect(-40, -40, W + 80, H + 80);
@@ -197,7 +197,7 @@ export function drawWorld(ctx, t, wave, env = {}) {
   for (const n of w.neb) { // nebulae breathe with the music
     const ox = Math.sin(t / n.s) * 30 - px * 6, oy = (t * 6) % 60;
     const a = 0.28 * (1 + 0.55 * beat);
-    ctx.fillStyle = radial(ctx, n.x + ox, n.y + oy, 0, n.r * (1 + 0.04 * beat), [[0, `rgba(${n.c},${a})`], [1, `rgba(${n.c},0)`]]);
+    ctx.fillStyle = radial(ctx, n.x + ox, n.y + oy, 0, n.r * (1 + 0.04 * beat), [[0, 'rgba(' + n.c + ',' + a + ')'], [1, 'rgba(' + n.c + ',0)']]);
     ctx.fillRect(-40, -40, W + 80, H + 80);
   }
   if (w.kind === 'ice') { // aurora ribbons flare up on boss kills
@@ -208,7 +208,7 @@ export function drawWorld(ctx, t, wave, env = {}) {
       const ag = ctx.createLinearGradient(0, 0, 0, 240);
       const base = [0.16, 0.14, 0.12][i] * (1 + flare * 3.5 + beat * 0.4);
       ag.addColorStop(0, 'rgba(0,0,0,0)');
-      ag.addColorStop(1, [`rgba(80,255,190,${base})`, `rgba(110,170,255,${base})`, `rgba(190,110,255,${base})`][i]);
+      ag.addColorStop(1, ['rgba(80,255,190,' + base + ')', 'rgba(110,170,255,' + base + ')', 'rgba(190,110,255,' + base + ')'][i]);
       ctx.fillStyle = ag; ctx.fill();
     }
   }
@@ -224,8 +224,10 @@ export function drawWorld(ctx, t, wave, env = {}) {
       ctx.beginPath(); ctx.ellipse(p.x + pox, py, p.r * 1.6, p.r * 0.32, -0.35, 0, 7); ctx.stroke();
     }
   }
+}
 
-  const sceneOx = -px * 16;
+function paintScenery(ctx, t, w, env, dt) {
+  const sceneOx = -(env.px || 0) * 16, beat = env.beat || 0;
   if (w.kind === 'rocks') {
     for (const r of rocks) {
       if (r.flash > 0) r.flash = Math.max(0, r.flash - dt);
@@ -241,19 +243,61 @@ export function drawWorld(ctx, t, wave, env = {}) {
   } else if (w.kind === 'farm') farm(ctx, t, sceneOx);
   else if (w.kind === 'city') city(ctx, t, sceneOx, beat);
   else if (w.kind === 'lava') lava(ctx, t, sceneOx, beat);
+}
 
+function paintStars(ctx, t, w, px, calm) {
+  const dim = w.kind === 'city' || w.kind === 'lava' ? 0.6 : 1;
   for (const l of layers) {
     for (const q of l.pts) {
-      ctx.globalAlpha = l.a * (0.7 + 0.3 * Math.sin(t * 2 + q.tw)) * (w.kind === 'city' || w.kind === 'lava' ? 0.6 : 1);
+      ctx.globalAlpha = calm ? l.a * 0.8 * dim : l.a * (0.7 + 0.3 * Math.sin(t * 2 + q.tw)) * dim;
       ctx.fillStyle = '#dfe6ff';
       ctx.fillRect(((q.x - px * l.par) % W + W) % W, (q.y + t * l.speed) % H, l.size, l.size * (l.speed > 30 ? 2.2 : 1));
     }
   }
   ctx.globalAlpha = 1;
+}
 
-  if (flare > 0.02) { // boss-kill flash tinted to the world
+function getBackdrop(widx, withScenery) {
+  const key = widx + (withScenery ? 's' : 'n');
+  let c = backdrops.get(key);
+  if (!c) {
+    c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d');
+    paintSky(g, 0, WORLDS[widx], 0, 0, 0);
+    if (withScenery) paintScenery(g, 0, WORLDS[widx], {}, 0);
+    backdrops.set(key, c);
+  }
+  return c;
+}
+
+/**
+ * env.q is the render quality: 2 paints everything live; 1 blits a cached sky and animates only the
+ * scenery; 0 blits a fully cached backdrop (scenery frozen) and only moves the stars.
+ */
+export function drawWorld(ctx, t, wave, env = {}) {
+  const dt = clamp(t - lastT, 0, 0.1); lastT = t;
+  const wi = worldIndex(wave), w = WORLDS[wi];
+  const q = env.q === undefined ? 2 : env.q, px = env.px || 0, flare = env.flare || 0;
+
+  const bg = getImg('background'); // a pack's own backdrop replaces the generated world
+  if (bg) {
+    const iw = bg.el.naturalWidth, ih = bg.el.naturalHeight, k = Math.max(W / iw, (H + 80) / ih) * bg.scale;
+    const w2 = iw * k, h2 = ih * k, yy = ((t * 10) % 80) - 80;
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+    ctx.drawImage(bg.el, (W - w2) / 2 - px * 8, yy + (H + 80 - h2) / 2, w2, h2);
+    paintStars(ctx, t, w, px, true);
+    return;
+  }
+
+  if (q >= 2) { paintSky(ctx, t, w, px, env.beat || 0, flare); paintScenery(ctx, t, w, env, dt); }
+  else if (q === 1) { ctx.drawImage(getBackdrop(wi, false), 0, 0); paintScenery(ctx, t, w, env, dt); }
+  else ctx.drawImage(getBackdrop(wi, true), 0, 0);
+
+  paintStars(ctx, t, w, px, q < 2);
+
+  if (q >= 2 && flare > 0.02) { // boss-kill flash tinted to the world
     ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = `rgba(${w.flare},${flare * 0.35})`; ctx.fillRect(-40, -40, W + 80, H + 80);
+    ctx.fillStyle = 'rgba(' + w.flare + ',' + flare * 0.35 + ')'; ctx.fillRect(-40, -40, W + 80, H + 80);
     ctx.globalCompositeOperation = 'source-over';
   }
 }

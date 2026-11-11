@@ -2,13 +2,31 @@ import { W, H } from '../shared/sim.js';
 
 // All art is original and drawn with canvas paths/gradients (no sprites, no emoji).
 
-import { clamp, shade, radial, shadowEllipse } from './util.js';
+import { clamp, shade, radial, shadowEllipse, quality } from './util.js';
 import { drawWorld, drawForeground } from './world.js';
 import * as sfx from './audio.js';
+import { pack, drawSprite, getImg, chickenSlot } from './packs.js';
+import { eventBack, eventFront, eventHat, eventEgg, eventShip, eventWingStops } from './events-art.js';
+import { theme } from './theme.js';
 import { TRAIL_INFO } from '../shared/catalog.js';
 import { detectEvents, ambient, updateParts, drawParts, shakeAmount, getFlare, getSummary, getCombo, heartLostAt, lensRings, spark, COMBO_COL } from './fx.js';
 
 // ---------- sprites ----------
+const vestCache = {};
+function vestOf(i) {
+  if (!i) return null;
+  const c = pack.colors.vests && pack.colors.vests[i - 1];
+  if (!c) return VEST[i];
+  return vestCache[c] || (vestCache[c] = [c, shade(c, -0.5)]);
+}
+const bulletRgba = (a, fallback) => {
+  const c = pack.colors.bullet;
+  if (!c) return fallback;
+  const n = parseInt(c.slice(1), 16);
+  return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+};
+const accentStroke = () => pack.colors.accent || (theme.event ? EVENT_ACCENT[theme.event] : null) || 'rgba(120,150,255,.35)';
+const EVENT_ACCENT = { halloween: 'rgba(255,138,30,.6)', christmas: 'rgba(255,82,82,.6)', valentine: 'rgba(255,111,165,.6)', nowruz: 'rgba(123,228,149,.6)' };
 const VEST = [null, ['#ef5350', '#8e1c1c'], ['#ffa726', '#b34700'], ['#42a5f5', '#0b3a8a'], ['#66bb6a', '#14501c']];
 
 // jagged crack lines on a damaged vest (deterministic per chicken)
@@ -66,7 +84,7 @@ function chicken(ctx, c, t, env) {
   const bob = Math.sin(t * 4 + c.id) * 2 * k;
   const panic = env.panic && !c.boss && !c.chick;
   const flap = Math.sin(t * (panic ? 22 : 11) + c.id * 1.7);
-  const vest = c.chick ? null : VEST[c.tier || 0];
+  const vest = c.chick ? null : vestOf(c.tier || 0);
   const entering = c.ent < 1;
   const angry = !!c.dv || c.boss;
 
@@ -122,7 +140,7 @@ function chicken(ctx, c, t, env) {
     ctx.rotate(side * spread);
     ctx.fillStyle = '#9a7b52';
     ctx.beginPath(); ctx.ellipse(side * 6 + 1.5, 2.5, c.sh ? 16 : 11, 6, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = radial(ctx, side * -2, -4, 1, 16, [[0, '#fff6e5'], [1, '#d2b48c']]);
+    ctx.fillStyle = radial(ctx, side * -2, -4, 1, 16, eventWingStops() || [[0, '#fff6e5'], [1, '#d2b48c']]);
     ctx.beginPath(); ctx.ellipse(side * 6, 0, c.sh ? 16 : 11, 6, 0, 0, 7); ctx.fill();
     ctx.restore();
   }
@@ -174,6 +192,7 @@ function chicken(ctx, c, t, env) {
     ctx.fillStyle = radial(ctx, x - 1.5, y - 2, 0.5, r + 1, [[0, '#ff8a80'], [1, '#c62828']]);
     ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
   }
+  eventHat(ctx, c, t);
   // eyes: follow the player; wide with tiny pupils when panicking; red when angry
   for (const x of [-6.5, 6.5]) {
     ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(x, -6, panic ? 5.2 : 4.3, panic ? 6.2 : 5, 0, 0, 7); ctx.fill();
@@ -227,9 +246,76 @@ function chicken(ctx, c, t, env) {
   }
 }
 
+// Flat-shaded chicken for slower phones: no gradients, no extrusion stack, no clipping except the vest.
+function chickenLite(ctx, c, t) {
+  const k = (c.r / 22) * (0.86 + (c.y / H) * 0.32);
+  const bob = Math.sin(t * 4 + c.id) * 2 * k, flap = Math.sin(t * 11 + c.id * 1.7);
+  const vest = c.chick ? null : vestOf(c.tier || 0);
+  ctx.save();
+  if (c.ent < 1) ctx.globalAlpha = 0.3 + 0.7 * c.ent;
+  ctx.translate(c.x, c.y + bob); ctx.scale(k, k);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(6, 15, 19, 16, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = c.chick ? '#e8c24a' : '#e6d2ae';
+  for (const side of [-1, 1]) {
+    ctx.save(); ctx.translate(side * 15, 2); ctx.rotate(side * (0.5 + flap * 0.45));
+    ctx.beginPath(); ctx.ellipse(side * 6, 0, 11, 6, 0, 0, 7); ctx.fill(); ctx.restore();
+  }
+  ctx.fillStyle = c.fl > 0 ? '#ffffff' : c.chick ? '#ffe36b' : '#f6ecd9';
+  ctx.beginPath(); ctx.ellipse(0, 2, 18, 20, 0, 0, 7); ctx.fill();
+  if (vest) {
+    ctx.save(); ctx.beginPath(); ctx.ellipse(0, 2, 18, 20, 0, 0, 7); ctx.clip();
+    ctx.fillStyle = vest[0]; ctx.fillRect(-19, 8, 38, 20);
+    ctx.fillStyle = vest[1]; ctx.fillRect(-19, 8, 38, 3);
+    if (c.tier >= 2) { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillRect(-19, 16, 38, 2.5); }
+    if (c.tier >= 4) { ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(-19, 22, 38, 2.5); }
+    ctx.restore();
+  }
+  ctx.fillStyle = '#d32f2f';
+  for (const [x, y, r] of [[-6, -19, 5], [0, -23, 6], [6, -19, 5]]) { ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill(); }
+  eventHat(ctx, c, t);
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-6.5, -6, 4.3, 0, 7); ctx.arc(6.5, -6, 4.3, 0, 7); ctx.fill();
+  ctx.fillStyle = c.dv ? '#c00' : '#111'; ctx.beginPath(); ctx.arc(-6.5, -5, 2.2, 0, 7); ctx.arc(6.5, -5, 2.2, 0, 7); ctx.fill();
+  ctx.fillStyle = '#ff9800'; ctx.beginPath(); ctx.moveTo(-5, 1); ctx.lineTo(5, 1); ctx.lineTo(0, 9); ctx.fill();
+  ctx.restore();
+  if (!c.chick && c.hp < c.max) {
+    for (let i = 0; i < c.hp; i++) {
+      ctx.fillStyle = vest ? vest[0] : '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(c.x + (i - (c.hp - 1) / 2) * 7, c.y - 34 * k, 2.6, 0, 7); ctx.fill(); ctx.stroke();
+    }
+  }
+}
+
+// A chicken drawn from the player's own image; vest tier shows as a coloured glow, damage as pips.
+function packChicken(ctx, c, t, slot) {
+  const k = (c.r / 22) * (0.86 + (c.y / H) * 0.32);
+  const bob = Math.sin(t * 4 + c.id) * 2 * k, vest = c.chick ? null : vestOf(c.tier || 0);
+  ctx.save();
+  if (c.ent < 1) ctx.globalAlpha = 0.3 + 0.7 * c.ent;
+  ctx.translate(c.x, c.y + bob);
+  shadowEllipse(ctx, 6 * k, 16 * k, 19 * k, 15 * k, 0.28);
+  if (vest && pack.opts.tierGlow !== false) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = radial(ctx, 0, 0, 4, 34 * k, [[0, vest[0] + 'aa'], [1, vest[0] + '00']]);
+    ctx.beginPath(); ctx.arc(0, 0, 34 * k, 0, 7); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  const pop = 1 + (c.fl > 0 ? 0.12 : 0);
+  ctx.scale(pop, pop);
+  drawSprite(ctx, slot, 54 * k);
+  if (c.sh) { ctx.strokeStyle = 'rgba(255,225,120,.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 50 * k, 0, 7); ctx.stroke(); }
+  ctx.restore();
+  if (!c.boss && !c.chick && c.hp < c.max) {
+    for (let i = 0; i < c.hp; i++) {
+      ctx.fillStyle = vest ? vest[0] : '#fff'; ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(c.x + (i - (c.hp - 1) / 2) * 7, c.y - 34 * k, 2.6, 0, 7); ctx.fill(); ctx.stroke();
+    }
+  }
+}
+
 function egg(ctx, e, t) {
   ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(Math.sin(t * 6 + e.x) * 0.3);
   shadowEllipse(ctx, 3, 4, 8, 10, 0.25);
+  if (drawSprite(ctx, 'egg', 22) || eventEgg(ctx, e, t)) { ctx.restore(); return; }
   ctx.fillStyle = radial(ctx, -3, -4, 1, 12, [[0, '#ffffff'], [0.6, '#f3e5cf'], [1, '#bfa078']]);
   ctx.beginPath(); ctx.ellipse(0, 0, 8, 10.5, 0, 0, 7); ctx.fill();
   ctx.restore();
@@ -244,6 +330,7 @@ function gift(ctx, g, t) {
   ctx.beginPath(); ctx.arc(0, 0, 26, 0, 7); ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
   shadowEllipse(ctx, 5, 9, 14, 8, 0.3);
+  if (drawSprite(ctx, 'gift_' + g.k, 34)) { ctx.restore(); return; }
   if (g.k === 'power') { // true 3-face box: front, side, top
     ctx.fillStyle = '#e65100'; ctx.fillRect(-11, -4, 18, 15);
     ctx.fillStyle = '#ffb300'; ctx.fillRect(-11, -4, 18, 6);
@@ -292,7 +379,13 @@ function gift(ctx, g, t) {
 }
 
 function bullets(ctx, list) {
+  const bs = getImg('bullet');
   for (const b of list) {
+    if (bs) {
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx) + Math.PI / 2);
+      drawSprite(ctx, 'bullet', b.w === 'm' ? 30 : 24); ctx.restore();
+      continue;
+    }
     if (b.w === 'm') { // homing missile: small rocket, rotated along its heading
       ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx) + Math.PI / 2);
       ctx.globalCompositeOperation = 'lighter';
@@ -332,7 +425,7 @@ function bullets(ctx, list) {
     } else { // blaster
       const len = 18, nx = b.vx / 700, ny = b.vy / 700;
       const g = ctx.createLinearGradient(b.x, b.y, b.x - nx * len * 1.8, b.y - ny * len * 1.8);
-      g.addColorStop(0, 'rgba(255,240,150,.9)'); g.addColorStop(1, 'rgba(255,120,0,0)');
+      g.addColorStop(0, bulletRgba(0.9, 'rgba(255,240,150,.9)')); g.addColorStop(1, bulletRgba(0, 'rgba(255,120,0,0)'));
       ctx.strokeStyle = g; ctx.lineWidth = 5; ctx.lineCap = 'round';
       ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(b.x - nx * len * 1.8, b.y - ny * len * 1.8); ctx.stroke();
       ctx.fillStyle = '#fffde7'; ctx.beginPath(); ctx.arc(b.x, b.y, 2.8, 0, 7); ctx.fill();
@@ -343,7 +436,7 @@ function bullets(ctx, list) {
 
 const WPN_COL = { blaster: '#ffd54f', pulse: '#4dd0e1', laser: '#f06292', missile: '#b0bec5', scatter: '#ff9800', arc: '#40c4ff', drone: '#69f0ae' };
 const WPN_CD = { blaster: 0.2, pulse: 0.085, laser: 0.17, missile: 0.45, scatter: 0.55, arc: 0.32, drone: 0.22 };
-const SKIN_BASE = { gold: '#d9a521', neon: '#0d1233', ghost: '#9fb4d9', dragon: '#a31515', galaxy: '#2a1659' };
+const SKIN_BASE = { pumpkin: '#e8731a', frost: '#8fd4ff', cupid: '#ff7fae', blossom: '#8fdc7a', gold: '#d9a521', neon: '#0d1233', ghost: '#9fb4d9', dragon: '#a31515', galaxy: '#2a1659' };
 
 // engine flame colours for the equipped trail (rainbow cycles through hues)
 function trailColors(id, t) {
@@ -408,6 +501,36 @@ function skin(ctx, p, t) {
       ctx.strokeStyle = 'rgba(40,0,0,.55)'; ctx.lineWidth = 1;
       for (let y = -26; y < 18; y += 5) for (let x = -12 + ((y / 5) & 1) * 3; x < 12; x += 6) { ctx.beginPath(); ctx.arc(x, y, 3.4, 0, Math.PI); ctx.stroke(); }
       ctx.fillStyle = '#ffd54f'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * 3.2, -12, 1.6, 0.9, 0, 0, 7); ctx.fill(); }
+      break;
+    }
+    case 'pumpkin': { // carved jack-o-lantern: ribs plus a glowing face below the cockpit
+      ctx.strokeStyle = 'rgba(120,50,0,.5)'; ctx.lineWidth = 1;
+      for (const x of [-7, -3.5, 0, 3.5, 7]) { ctx.beginPath(); ctx.moveTo(x, -26); ctx.quadraticCurveTo(x * 1.5, -4, x, 16); ctx.stroke(); }
+      ctx.fillStyle = 'rgba(255,235,120,' + (0.75 + 0.25 * Math.sin(t * 7)) + ')';
+      ctx.beginPath(); ctx.moveTo(-6, 3); ctx.lineTo(-2, 3); ctx.lineTo(-4, 8); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(2, 3); ctx.lineTo(6, 3); ctx.lineTo(4, 8); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-6, 10); ctx.lineTo(-3, 13); ctx.lineTo(0, 10); ctx.lineTo(3, 13); ctx.lineTo(6, 10); ctx.lineTo(5, 15); ctx.lineTo(-5, 15); ctx.closePath(); ctx.fill();
+      break;
+    }
+    case 'frost': { // ice facets with a travelling glint
+      ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.beginPath(); ctx.moveTo(0, -28); ctx.lineTo(-9, 6); ctx.lineTo(0, -4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(120,190,255,.32)'; ctx.beginPath(); ctx.moveTo(0, -28); ctx.lineTo(9, 6); ctx.lineTo(0, -4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.moveTo(-9, 6); ctx.lineTo(0, 16); ctx.lineTo(0, -4); ctx.closePath(); ctx.fill();
+      const gy = ((t * 18) % 50) - 30;
+      ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-3, gy); ctx.lineTo(3, gy); ctx.moveTo(0, gy - 3); ctx.lineTo(0, gy + 3); ctx.stroke();
+      break;
+    }
+    case 'cupid': { // heart emblem + arrow
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.moveTo(0, 14); ctx.bezierCurveTo(-9, 6, -5, -2, 0, 3); ctx.bezierCurveTo(5, -2, 9, 6, 0, 14); ctx.fill();
+      ctx.strokeStyle = 'rgba(120,0,50,.6)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-8, 12); ctx.lineTo(8, 2); ctx.stroke();
+      break;
+    }
+    case 'blossom': { // little flowers across the hull
+      for (const [x, y] of [[-5, -14], [5, -8], [-4, 0], [5, 8], [-3, 12]]) {
+        ctx.fillStyle = '#ffb7d5'; for (let k = 0; k < 5; k++) { const a = (k / 5) * Math.PI * 2 + t * 0.4; ctx.beginPath(); ctx.arc(x + Math.cos(a) * 2.4, y + Math.sin(a) * 2.4, 1.7, 0, 7); ctx.fill(); }
+        ctx.fillStyle = '#ffd54f'; ctx.beginPath(); ctx.arc(x, y, 1.3, 0, 7); ctx.fill();
+      }
       break;
     }
     case 'galaxy': { // swirling nebula + twinkling stars
@@ -541,6 +664,9 @@ function ship(ctx, p, t) {
   ctx.beginPath(); ctx.moveTo(-7, 12); ctx.lineTo(0, 14 + fl); ctx.lineTo(7, 12); ctx.closePath(); ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
 
+  const shipImg = getImg('ship');
+  if (shipImg) drawSprite(ctx, 'ship', 64);
+  else {
   // wings
   for (const s of [-1, 1]) {
     ctx.fillStyle = shade(base, -0.45);
@@ -556,7 +682,7 @@ function ship(ctx, p, t) {
   ctx.fillStyle = hg; hullPath(ctx); ctx.fill();
   ctx.save(); hullPath(ctx); ctx.clip(); skin(ctx, p, t); ctx.restore();
   if (p.skin === 'neon') { // glowing tube outline in the pilot's colour
-    ctx.save(); ctx.shadowColor = p.color; ctx.shadowBlur = 12 + Math.sin(t * 5) * 3; ctx.strokeStyle = p.color; ctx.lineWidth = 2;
+    ctx.save(); ctx.shadowColor = p.color; ctx.shadowBlur = quality.level >= 2 ? 12 + Math.sin(t * 5) * 3 : 0; ctx.strokeStyle = p.color; ctx.lineWidth = 2;
     hullPath(ctx); ctx.stroke();
     for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 5, -2); ctx.lineTo(s * 26, 18); ctx.lineTo(s * 20, 22); ctx.lineTo(s * 6, 14); ctx.stroke(); }
     ctx.restore();
@@ -571,6 +697,7 @@ function ship(ctx, p, t) {
   }
   ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1; hullPath(ctx); ctx.stroke();
 
+  eventShip(ctx, p, t);
   weaponHardware(ctx, p, t);
 
   // cockpit
@@ -578,6 +705,7 @@ function ship(ctx, p, t) {
   ctx.beginPath(); ctx.ellipse(0, -6, 4.5, 9, 0, 0, 7); ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.beginPath(); ctx.ellipse(-1.5, -9, 1.4, 4, 0, 0, 7); ctx.fill();
 
+  }
   muzzle(ctx, p, t);
 
   // shield bubble
@@ -592,7 +720,7 @@ function ship(ctx, p, t) {
 
 // ---------- HUD ----------
 function panel(ctx, x, y, w, h) {
-  ctx.fillStyle = 'rgba(8,12,40,.6)'; ctx.strokeStyle = 'rgba(120,150,255,.35)'; ctx.lineWidth = 1;
+  ctx.fillStyle = 'rgba(8,12,40,.6)'; ctx.strokeStyle = accentStroke(); ctx.lineWidth = 1;
   ctx.beginPath(); ctx.roundRect(x, y, w, h, 8); ctx.fill(); ctx.stroke();
 }
 function heartPath(ctx, x, y, s) {
@@ -668,7 +796,15 @@ function hud(ctx, s, me, t) {
     panel(ctx, 8, y, 210, 34);
     ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(22, y + 17, 6, 0, 7); ctx.fill();
     ctx.font = 'bold 12px system-ui, sans-serif'; ctx.fillStyle = '#e8eaf6';
-    ctx.fillText(p.id === me ? `${p.name} (you)` : p.name, 34, y + 11);
+    const label = p.id === me ? p.name + ' (you)' : p.name;
+    ctx.fillText(label, 34, y + 11);
+    if (p.ping != null) { // each pilot's measured latency to the server
+      const px = 34 + ctx.measureText(label).width + 8;
+      ctx.font = 'bold 10px system-ui, sans-serif';
+      ctx.fillStyle = p.ping < 60 ? '#69f0ae' : p.ping < 130 ? '#ffd54f' : '#ff6e6e';
+      ctx.fillText(p.ping + 'ms', px, y + 12);
+      ctx.font = 'bold 12px system-ui, sans-serif';
+    }
     const slots = Math.min(5, Math.max(3, p.lives)), lost = heartLostAt(p.id);
     for (let l = 0; l < slots; l++) {
       const hx = 40 + l * 14, hy = y + 25;
@@ -680,7 +816,7 @@ function hud(ctx, s, me, t) {
     ctx.save();
     for (let w = 0; w < 5; w++) {
       const on = w < p.power;
-      if (on) { ctx.shadowColor = '#ffb300'; ctx.shadowBlur = 7; }
+      if (on && quality.level >= 2) { ctx.shadowColor = '#ffb300'; ctx.shadowBlur = 7; }
       const g = ctx.createLinearGradient(0, y + 21, 0, y + 29);
       g.addColorStop(0, on ? '#fff3b0' : 'rgba(255,255,255,.18)'); g.addColorStop(1, on ? '#ff9800' : 'rgba(255,255,255,.08)');
       ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(116 + w * 8, y + 21, 6, 8, 2); ctx.fill();
@@ -775,9 +911,15 @@ function summaryCard(ctx, s, t) {
   ctx.restore();
 }
 
+let vigCanvas = null; // the vignette never changes, so paint it once and blit it
 function vignette(ctx) {
-  ctx.fillStyle = radial(ctx, W / 2, H / 2, H * 0.45, H * 0.95, [[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,10,.55)']]);
-  ctx.fillRect(0, 0, W, H);
+  if (!vigCanvas) {
+    vigCanvas = document.createElement('canvas'); vigCanvas.width = W; vigCanvas.height = H;
+    const g = vigCanvas.getContext('2d');
+    g.fillStyle = radial(g, W / 2, H / 2, H * 0.45, H * 0.95, [[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,10,.55)']]);
+    g.fillRect(0, 0, W, H);
+  }
+  ctx.drawImage(vigCanvas, 0, 0);
 }
 
 // shockwave lens: magnify the pixels under a ring edge for a heat-haze look
@@ -831,7 +973,7 @@ export function draw(ctx, s, me, t, { paused, silent } = {}) {
   const mine = s.players[me];
   const wenv = {
     px: mine && mine.alive ? clamp((mine.x - W / 2) / (W / 2), -1, 1) : 0,
-    beat: sfx.getBeat(), flare: getFlare(), bullets: s.bullets, spark: (x, y) => spark(x, y),
+    q: quality.level, beat: sfx.getBeat(), flare: getFlare(), bullets: s.bullets, spark: (x, y) => spark(x, y),
   };
 
   const sh = shakeAmount();
@@ -839,8 +981,14 @@ export function draw(ctx, s, me, t, { paused, silent } = {}) {
   if (sh > 0.5) ctx.translate((Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh);
   drawWorld(ctx, t, s.wave, wenv);
 
+  eventBack(ctx, t, quality.level);
   for (const p of list) if (!p.alive && !s.over) ghost(ctx, p, t);
-  for (const c of [...s.chickens].sort((a, b) => a.y - b.y)) chicken(ctx, c, t, cenv);
+  const full = quality.level >= 2;
+  for (const c of [...s.chickens].sort((a, b) => a.y - b.y)) {
+    const ps = chickenSlot(c);
+    if (ps) packChicken(ctx, c, t, ps);
+    else if (full || c.boss) chicken(ctx, c, t, cenv); else chickenLite(ctx, c, t);
+  }
   for (const g of s.gifts) gift(ctx, g, t);
   for (const e of s.eggs) egg(ctx, e, t);
   bullets(ctx, s.bullets);
@@ -848,17 +996,23 @@ export function draw(ctx, s, me, t, { paused, silent } = {}) {
   for (const p of list) if (p.alive) ship(ctx, p, t);
   drawParts(ctx);
   if (list.length > 1) for (const p of list) if (p.alive) nameTag(ctx, p);
-  drawForeground(ctx, t, s.wave, wenv);
+  eventFront(ctx, t, quality.level);
+  if (quality.level >= 2) drawForeground(ctx, t, s.wave, wenv);
   vignette(ctx);
   ctx.restore();
-  lens(ctx);
+  if (quality.level >= 2 && !(pack.opts.pixel > 1)) lens(ctx);
 
+  if (pack.colors.overlay && pack.colors.overlayAlpha > 0) {
+    const n = parseInt(pack.colors.overlay.slice(1), 16);
+    ctx.fillStyle = 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + pack.colors.overlayAlpha + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
   if (!silent) { hud(ctx, s, me, t); summaryCard(ctx, s, t); }
 
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const glowText = (txt, y, size, col) => {
     ctx.font = `bold ${size}px system-ui, sans-serif`;
-    ctx.shadowColor = col; ctx.shadowBlur = 24; ctx.fillStyle = col; ctx.fillText(txt, W / 2, y);
+    ctx.shadowColor = col; ctx.shadowBlur = quality.level >= 2 ? 24 : 0; ctx.fillStyle = col; ctx.fillText(txt, W / 2, y);
     ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.globalAlpha *= 0.85; ctx.fillText(txt, W / 2, y); ctx.globalAlpha /= 0.85;
   };
   if (s.bt > 0 && !s.over && !silent) {

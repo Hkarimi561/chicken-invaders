@@ -8,6 +8,7 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import { createState, addPlayer, removePlayer, setInput, step, emptyInput, W, H } from '../shared/sim.js';
 import { buyItem, equipItem, loadoutOf, sanitizeProfile, defaultProfile } from '../shared/catalog.js';
+import { EVENTS, activeEvent } from '../shared/events.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const MAX_PLAYERS = 4;
@@ -16,6 +17,8 @@ const dist = path.join(__dirname, '..', 'dist');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const FILE = path.join(DATA_DIR, 'profiles.json');
 const ID_RE = /^[a-f0-9]{24}$/;
+// The running seasonal event (decides when limited-time shop skins can be bought). EVENT_OVERRIDE=halloween forces one.
+const serverEvent = () => (EVENTS[process.env.EVENT_OVERRIDE] ? process.env.EVENT_OVERRIDE : activeEvent(new Date()));
 
 export function lanAddresses() {
   const out = [];
@@ -75,7 +78,7 @@ function creditPending(profile, keys, wave) {
 const app = express();
 app.use(express.json({ limit: '10kb' }));
 app.use(express.static(dist));
-app.get('/api/info', (_req, res) => res.json({ port: PORT, addresses: lanAddresses() }));
+app.get('/api/info', (_req, res) => res.json({ port: PORT, addresses: lanAddresses(), event: serverEvent() }));
 
 const hits = new Map(); // tiny per-IP rate limit for the mutating API
 app.use('/api', (req, res, next) => {
@@ -106,7 +109,7 @@ app.get('/api/profile/:id', (req, res) => {
 });
 app.post('/api/buy', (req, res) => {
   const w = withProfile(req, res); if (!w) return;
-  const r = buyItem(w.p, req.body?.item);
+  const r = buyItem(w.p, req.body?.item, { event: serverEvent() });
   if (!r.ok) return fail(res, 400, r.error);
   save(); res.json({ profile: w.p });
 });
@@ -200,6 +203,9 @@ function startGame(room) {
   broadcastRoom(room);
 }
 
+// Snapshots are serialised once per tick (not once per client) with positions rounded to 0.01.
+const round2 = (_k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 100) / 100 : v);
+
 const num = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(v, Math.max(W, H))) : null);
 
 wss.on('connection', (ws) => {
@@ -211,6 +217,7 @@ wss.on('connection', (ws) => {
   ws.on('message', (raw) => {
     let m;
     try { m = JSON.parse(raw); } catch { return; }
+    if (m.t === 'ping') return send(ws, { t: 'pong', ts: m.ts });
     if (m.t === 'join') {
       leave(ws);
       ws.pname = String(m.name || 'Pilot').slice(0, 14);
@@ -238,6 +245,9 @@ wss.on('connection', (ws) => {
         startGame(room);
       } else if (m.t === 'restart' && room.host === ws.pid && room.state?.over) {
         startGame(room);
+      } else if (m.t === 'rtt' && room.state) {
+        const p = room.state.players[ws.pid]; // each pilot's measured latency, shown in everyone's HUD
+        if (p) p.ping = Math.max(0, Math.min(999, Math.round(Number(m.ms) || 0)));
       } else if (m.t === 'leave') {
         leave(ws);
       }
@@ -255,7 +265,10 @@ setInterval(() => {
       room.overHandled = true;
       for (const c of room.clients) creditPlayer(c, room);
     }
-    if (++room.tick % 2 === 0) for (const c of room.clients) send(c, { t: 'state', s: room.state });
+    if (++room.tick % 2 === 0) {
+      const msg = JSON.stringify({ t: 'state', s: room.state }, round2);
+      for (const c of room.clients) if (c.readyState === 1) c.send(msg);
+    }
   }
 }, 1000 / 60);
 

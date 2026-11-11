@@ -1,6 +1,7 @@
 import { H, W } from '../shared/sim.js';
-import { clamp } from './util.js';
+import { clamp, quality } from './util.js';
 import * as sfx from './audio.js';
+import { sparkColors } from './events-art.js';
 import { TRAIL_INFO } from '../shared/catalog.js';
 
 // Client-only effects. Events are inferred by diffing consecutive states, so
@@ -39,7 +40,7 @@ export function timeScale(realDt) {
 }
 
 export function burst(x, y, n, colors, speed = 220, size = 4, life = 0.7, type = 'spark') {
-  if (parts.length > 800) return;
+  if (parts.length > (quality.level >= 2 ? 800 : quality.level === 1 ? 300 : 120)) return;
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2, v = speed * (0.3 + Math.random() * 0.9);
     parts.push({
@@ -102,7 +103,7 @@ export function detectEvents(s, me, t, silent = false) {
       burstDone.add(id);
       const isBoss = !!c.boss;
       burst(c.x, c.y, isBoss ? 70 : 14, ['#ffffff', '#f4e4c8', '#ffcc80'], isBoss ? 380 : 200, isBoss ? 8 : 5, 1.1, 'feather');
-      burst(c.x, c.y, isBoss ? 50 : 10, ['#ffee58', '#ff9800', '#ff5722'], isBoss ? 420 : 240, 3, 0.5, 'spark');
+      burst(c.x, c.y, isBoss ? 50 : 10, (sparkColors() || ['#ffee58', '#ff9800', '#ff5722']), isBoss ? 420 : 240, 3, 0.5, 'spark');
       ring(c.x, c.y, isBoss ? 620 : 170, isBoss ? 0.9 : 0.35, isBoss ? 'rgba(255,220,150,.9)' : 'rgba(255,230,180,.6)', isBoss ? 6 : 2, isBoss);
       if (isBoss) {
         ring(c.x, c.y, 380, 1.2, 'rgba(255,120,60,.8)', 4, true);
@@ -188,16 +189,16 @@ export function detectEvents(s, me, t, silent = false) {
 // per-frame ambient effects: engine trails, missile smoke
 export function ambient(s) {
   for (const p of Object.values(s.players)) {
-    if (p.alive && Math.random() < 0.6) {
+    if (p.alive && Math.random() < (quality.level >= 2 ? 0.6 : quality.level === 1 ? 0.25 : 0)) {
       parts.push({ x: p.x + (Math.random() - 0.5) * 6, y: p.y + 16, vx: (Math.random() - 0.5) * 20, vy: 90 + Math.random() * 60, life: 0.3, max: 0.3, size: 3, c: p.trail === 'rainbow' ? 'hsl(' + ((performance.now() / 6) % 360) + ',90%,60%)' : ((TRAIL_INFO[p.trail] && TRAIL_INFO[p.trail].hex) || '#ffb347'), type: 'spark', rot: 0 });
     }
   }
   for (const b of s.bullets) {
-    if (b.w === 'm') parts.push({ x: b.x, y: b.y + 8, vx: (Math.random() - 0.5) * 20, vy: 30, life: 0.5, max: 0.5, size: 4, c: '#b0bec5', type: 'smoke', rot: 0 });
+    if (b.w === 'm' && quality.level > 0) parts.push({ x: b.x, y: b.y + 8, vx: (Math.random() - 0.5) * 20, vy: 30, life: 0.5, max: 0.5, size: 4, c: '#b0bec5', type: 'smoke', rot: 0 });
   }
   // charging chickens leave motion streaks
   for (const c of s.chickens) {
-    if (c.dv && Math.random() < 0.5) parts.push({ x: c.x + (Math.random() - 0.5) * 16, y: c.y - 14, vx: 0, vy: -30, life: 0.25, max: 0.25, size: 2.5, c: '#ff8a80', type: 'spark', rot: 0 });
+    if (quality.level > 0 && c.dv && Math.random() < 0.5) parts.push({ x: c.x + (Math.random() - 0.5) * 16, y: c.y - 14, vx: 0, vy: -30, life: 0.25, max: 0.25, size: 2.5, c: '#ff8a80', type: 'spark', rot: 0 });
   }
 }
 

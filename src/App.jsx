@@ -10,6 +10,13 @@ import {
 import { draw, drawShipPreview } from './render.js';
 import { resetFx } from './fx.js';
 import * as store from './profile.js';
+import { quality, IS_TOUCH } from './util.js';
+import PackEditor from './PackEditor.jsx';
+import { theme, initTheme, setEventMode } from './theme.js';
+import { loadActivePack } from './packs.js';
+import { EVENTS, activeEvent, nextEvent, fmtWindow } from '../shared/events.js';
+
+initTheme(); // pick the seasonal theme before anything draws
 
 function QR({ text }) {
   const src = useMemo(() => {
@@ -44,6 +51,7 @@ function Attract() {
   const cv = useRef(null);
   useEffect(() => {
     const ctx = cv.current.getContext('2d');
+    if (IS_TOUCH) quality.level = 0; // the menu backdrop is decoration: keep it cheap on phones
     let s, startWave, raf, acc = 0, last = performance.now();
     const pick = (a) => a[(Math.random() * a.length) | 0];
     const fresh = () => {
@@ -82,9 +90,9 @@ function Attract() {
 const Keys = ({ n }) => <span className="keychip">🔑 {n}</span>;
 
 // ---------------- Shop & Hangar ----------------
-const TABS = ['Upgrades', 'Guns', 'Skins', 'Paint', 'Trails'];
+const TABS = ['Upgrades', 'Guns', 'Skins', 'Events', 'Paint', 'Trails'];
 
-function Shop({ profile, setProfile, onBack }) {
+function Shop({ profile, setProfile, onBack, event }) {
   const [tab, setTab] = useState('Upgrades');
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -105,7 +113,7 @@ function Shop({ profile, setProfile, onBack }) {
   const claim = () => act(async () => { const r = await store.claim(); setMsg(`Claimed ${r.claimed} key${r.claimed === 1 ? '' : 's'}!`); return r.profile; });
 
   const Buy = ({ item, label }) => {
-    const q = quote(profile, item);
+    const q = quote(profile, item, { event });
     if (q.error) return <button disabled>{q.error}</button>;
     return <button disabled={offline || busy || profile.keys < q.cost} onClick={() => buyIt(item, label)}>Buy · 🔑 {q.cost}</button>;
   };
@@ -169,13 +177,28 @@ function Shop({ profile, setProfile, onBack }) {
               ))}
             </>)}
 
-            {tab === 'Skins' && SKINS.map((id) => (
+            {tab === 'Skins' && SKINS.filter((id) => !SKIN_INFO[id].event).map((id) => (
               <div className={SKIN_INFO[id].special ? 'item special' : 'item'} key={id}>
                 <div className="item-h"><b>{SKIN_INFO[id].name}</b>{SKIN_INFO[id].special && <em>special</em>}</div>
                 <ShipView still size={76} opts={{ ...shipOpts(l), skin: id }} />
                 {profile.owned.skin.includes(id) ? <Pick slot="skin" value={id} current={l.skin} /> : <Buy item={`skin:${id}`} label={SKIN_INFO[id].name} />}
               </div>
             ))}
+
+            {tab === 'Events' && (<>
+              <div className="item wide"><p className="sub">Limited-time ship skins: sold only while their event is running, yours to keep afterwards.{event ? ' Right now: ' + EVENTS[event].icon + ' ' + EVENTS[event].name + '.' : ' No event is running at the moment.'}</p></div>
+              {SKINS.filter((id) => SKIN_INFO[id].event).map((id) => {
+                const info = SKIN_INFO[id], ev = EVENTS[info.event];
+                return (
+                  <div className="item special" key={id}>
+                    <div className="item-h"><b>{info.name}</b><em>{ev.icon} {ev.name}</em></div>
+                    <ShipView still size={76} opts={{ ...shipOpts(l), skin: id }} />
+                    <p className="sub tiny">On sale {fmtWindow(info.event)}</p>
+                    {profile.owned.skin.includes(id) ? <Pick slot="skin" value={id} current={l.skin} /> : <Buy item={'skin:' + id} label={info.name} />}
+                  </div>
+                );
+              })}
+            </>)}
 
             {tab === 'Paint' && (<>
               <div className="item">
@@ -218,6 +241,28 @@ function Shop({ profile, setProfile, onBack }) {
   );
 }
 
+// Shows which seasonal theme is active and lets the player force one or switch events off.
+function EventBar({ mode, onPick }) {
+  const ev = theme.event && EVENTS[theme.event];
+  const next = nextEvent();
+  return (
+    <div className={'eventbar' + (ev ? ' on' : '')} style={ev ? { borderColor: ev.accent } : undefined}>
+      <div>
+        {ev
+          ? <><b>{ev.icon} {ev.name} theme</b> <span className="sub tiny">{ev.tagline}</span></>
+          : <span className="sub">No seasonal event right now · next: <b>{EVENTS[next.id].icon} {EVENTS[next.id].name}</b> in {next.days} day{next.days === 1 ? '' : 's'}</span>}
+      </div>
+      <label className="tiny">Seasonal theme
+        <select value={mode} onChange={(e) => onPick(e.target.value)}>
+          <option value="auto">Automatic (follows the date)</option>
+          <option value="off">Off</option>
+          {Object.entries(EVENTS).map(([id, e]) => <option key={id} value={id}>{e.icon} {e.name}</option>)}
+        </select>
+      </label>
+    </div>
+  );
+}
+
 export default function App() {
   const urlRoom = useMemo(() => (new URLSearchParams(location.search).get('room') || '').toUpperCase().slice(0, 4), []);
   const [screen, setScreen] = useState('menu'); // menu | shop | single | lobby | multi
@@ -228,13 +273,16 @@ export default function App() {
   const [info, setInfo] = useState(null);
   const [copied, setCopied] = useState(false);
   const [profile, setProfile] = useState(store.offlineProfile);
+  const [evMode, setEvMode] = useState(theme.mode);
   const net = useRef(null);
   const runRef = useRef(null);
 
   const refresh = useCallback(() => store.loadProfile().then(setProfile).catch(() => setProfile(store.offlineProfile())), []);
   useEffect(() => { fetch('/api/info').then((r) => r.json()).then(setInfo).catch(() => {}); refresh(); }, [refresh]);
+  useEffect(() => { loadActivePack(); }, []); // the pack picked last time
 
   const loadout = useMemo(() => loadoutOf(profile), [profile]);
+  const pickEvent = (m) => { setEventMode(m); setEvMode(m); };
 
   const leave = useCallback(() => {
     net.current?.send({ t: 'leave' });
@@ -287,7 +335,9 @@ export default function App() {
     return <Shell><Game mode="multi" net={net.current} onExit={leave} /><Hint room={room} /></Shell>;
 
   if (screen === 'shop')
-    return <Shell><Attract /><Shop profile={profile} setProfile={setProfile} onBack={() => { setScreen('menu'); refresh(); }} /></Shell>;
+    return <Shell><Attract /><Shop profile={profile} setProfile={setProfile} event={info && 'event' in info ? info.event : activeEvent()} onBack={() => { setScreen('menu'); refresh(); }} /></Shell>;
+  if (screen === 'packs')
+    return <Shell><Attract /><PackEditor onBack={() => setScreen('menu')} /></Shell>;
 
   if (screen === 'lobby' && room) {
     const host = room.host === room.you;
@@ -329,10 +379,12 @@ export default function App() {
             <Keys n={profile.keys} />
             {profile.pending > 0 && <button className="small" disabled={!!profile.offline} onClick={() => store.claim().then((r) => setProfile(r.profile)).catch(() => {})}>Claim 🔑 {profile.pending}</button>}
             <button className="ghost" onClick={() => setScreen('shop')}>Hangar &amp; Shop</button>
+            <button className="ghost" onClick={() => setScreen('packs')}>Resource packs</button>
             <p className="sub tiny">Every pilot starts with the standard plane. Find 🔑 in battle to upgrade it.</p>
           </div>
         </div>
 
+        <EventBar mode={evMode} onPick={pickEvent} />
         <button onClick={startSingle}>Single player</button>
         <hr />
         {urlRoom && <p className="sub">Invited to room <b>{urlRoom}</b> — tap Join.</p>}
