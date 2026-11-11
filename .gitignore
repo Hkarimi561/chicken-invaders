@@ -1,0 +1,8 @@
+node_modules/
+dist/
+# player profiles contain secret profile codes: never commit
+data/
+*.log
+.claude/
+graphify-out/
+package-lock.json
