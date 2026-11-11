@@ -285,7 +285,10 @@ export function step(s, dt) {
       const ratio = c.hp / c.max;
       c.ph = ratio > 0.66 ? 1 : ratio > 0.33 ? 2 : 3;
       c.sh = c.mother && c.ph === 3 && s.t % 6 > 4 ? 1 : 0; // wings shield every 6s
-      bx = W / 2 + Math.sin(s.t * (0.6 + 0.25 * c.ph)) * 250;
+      // Integrate the swing angle instead of using sin(t * speed): the speed rises with each phase, and
+      // multiplying a large t by a new speed would jump the boss across the screen in a single frame.
+      c.ang = (c.ang || 0) + dt * (0.6 + 0.25 * c.ph);
+      bx = W / 2 + Math.sin(c.ang) * 250;
       by = 110 + Math.sin(s.t * 1.3) * 20;
     } else if (s.pattern === 'grid') { bx = W / 2 + s.gx + c.ox; by = 80 + s.gy + c.oy; }
     else { const a = c.a + s.t * 0.8 * c.dir; bx = W / 2 + Math.cos(a) * c.R; by = 190 + s.gy + Math.sin(a) * c.R * 0.55; }

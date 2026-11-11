@@ -120,3 +120,16 @@ select { background: #0a0f2a; color: inherit; border: 1px solid #3949ab; border-
 .colorpick.check { flex-direction: row; align-items: center; }
 .colorpick.check input { width: auto; }
 @media (max-width: 640px) { .packlist { width: 100%; max-height: none; } }
+
+/* ---- gyroscope + leaderboard ---- */
+.tools button.on { background: #ffb300; color: #1a1200; border-color: #ffd54f; }
+.gyronote { position: absolute; left: 10px; right: 10px; top: 84px; z-index: 5; padding: 8px 10px; border-radius: 8px; background: rgba(8, 12, 40, .92); border: 1px solid rgba(255, 213, 79, .6); font-size: 13px; }
+.gyronote a { color: #ffd54f; font-weight: 700; }
+.keychip.rating { color: #b2ff59; border-color: rgba(178, 255, 89, .5); background: rgba(178, 255, 89, .1); }
+.lb .tabs .grow { flex: 1; }
+.lbtable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.lbtable th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #9fa8da; padding: 4px 8px; }
+.lbtable td { padding: 6px 8px; border-top: 1px solid rgba(40, 53, 147, .6); }
+.lbtable .num { text-align: right; font-variant-numeric: tabular-nums; }
+.lbtable tr.you td { background: rgba(255, 179, 0, .13); }
+@media (max-width: 560px) { .hide-s { display: none; } }

@@ -6,6 +6,7 @@ import * as sfx from './audio.js';
 import { quality, IS_TOUCH } from './util.js';
 import { pack } from './packs.js';
 import { theme } from './theme.js';
+import { screenTilt, tiltToTarget, gyroSupport } from './gyro.js';
 
 const KEYS = {
   ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
@@ -22,7 +23,7 @@ function initialQuality() {
 // Virtual joystick (left) + hold-to-fire button (right) for phones/tablets.
 // The stick keeps no React state: the knob is moved with a transform and the stick's centre is measured
 // once per touch, so dragging never triggers a re-render or a forced layout while the canvas is drawing.
-function Controls({ apply }) {
+function Controls({ apply, stick }) {
   const baseEl = useRef(null);
   const knobEl = useRef(null);
   const g = useRef({ id: -1, cx: 0, cy: 0, m: 1, dir: '' });
@@ -47,6 +48,7 @@ function Controls({ apply }) {
 
   return (
     <div className="controls">
+      {stick === false ? <div /> : (
       <div
         ref={baseEl} className="stick"
         onPointerDown={(e) => {
@@ -60,6 +62,7 @@ function Controls({ apply }) {
       >
         <div ref={knobEl} className="knob" />
       </div>
+      )}
       <div
         className="fire"
         onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); apply({ fire: 1 }); }}
@@ -70,7 +73,7 @@ function Controls({ apply }) {
 }
 
 // mode 'single': local sim. mode 'multi': server snapshots + local prediction.
-export default function Game({ mode, net, onExit, name, loadout, onRunEnd }) {
+export default function Game({ mode, net, onExit, name, loadout, onRunEnd, secureUrl }) {
   const cv = useRef(null);
   const stage = useRef(null);
   const api = useRef({ apply: () => {} });
@@ -79,6 +82,10 @@ export default function Game({ mode, net, onExit, name, loadout, onRunEnd }) {
   const loadKey = JSON.stringify(loadout || {});
   const [muted, setMuted] = useState(sfx.isMuted());
   const [ping, setPing] = useState(null);
+  const [gyroOn, setGyroOn] = useState(false);
+  const [gyroNote, setGyroNote] = useState(null); // { text, link? }
+  const recenter = useRef(false);
+  const noteTimer = useRef(null);
 
   useEffect(() => {
     // alpha:false = cheaper compositing; desynchronized = lower input-to-photon latency where supported
@@ -120,10 +127,11 @@ export default function Game({ mode, net, onExit, name, loadout, onRunEnd }) {
     // Single player: tell the server how many keys this run collected (multiplayer keys are counted server-side).
     const report = () => {
       if (!single || reported || !s) return;
-      const keys = s.players.me?.keys || 0;
-      if (!s.over && keys === 0) return;
+      const me0 = s.players.me;
+      const keys = me0?.keys || 0, score = me0?.score || 0;
+      if (!s.over && keys === 0 && score === 0) return;
       reported = true;
-      runEnd.current?.({ keys, wave: s.wave, over: !!s.over });
+      runEnd.current?.({ keys, wave: s.wave, over: !!s.over, score, kills: me0?.kills || 0 });
     };
 
     const pushInput = () => { if (!single) net.send({ t: 'input', input: { ...input } }); };
@@ -227,6 +235,57 @@ export default function Game({ mode, net, onExit, name, loadout, onRunEnd }) {
     };
   }, [mode, net, onExit, name, loadKey]);
 
+  // ---- gyroscope steering (phones and tablets): tilt the device to move the ship ----
+  const note = (text, link) => {
+    setGyroNote({ text, link });
+    clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setGyroNote(null), 7000);
+  };
+  const toggleGyro = async () => {
+    if (gyroOn) { setGyroOn(false); try { localStorage.setItem('cb-gyro', '0'); } catch { /* ignore */ } return; }
+    const sup = gyroSupport();
+    if (sup === 'unsupported') return note('This device has no motion sensor.');
+    if (sup === 'insecure') {
+      return note('Browsers only allow motion sensors on secure (https) pages.', secureUrl || undefined);
+    }
+    if (sup === 'needs-permission') { // iOS asks the first time, and only from a tap
+      let r = 'denied';
+      try { r = await window.DeviceOrientationEvent.requestPermission(); } catch { /* denied */ }
+      if (r !== 'granted') return note('Motion access was not allowed. Allow it in your browser settings and try again.');
+    }
+    recenter.current = true;
+    setGyroOn(true);
+    try { localStorage.setItem('cb-gyro', '1'); } catch { /* ignore */ }
+    return note('Gyro on: the pose you hold now is the centre. Tilt to steer; tap ⟲ to recentre.');
+  };
+  useEffect(() => { // Android needs no prompt, so remember the choice; iOS must be re-enabled by a tap
+    let saved = '0';
+    try { saved = localStorage.getItem('cb-gyro') || '0'; } catch { /* ignore */ }
+    if (IS_TOUCH && saved === '1' && gyroSupport() === 'ready') { recenter.current = true; setGyroOn(true); }
+  }, []);
+  useEffect(() => {
+    if (!gyroOn) return undefined;
+    let neutral = null, sx = null, sy = null, last = 0, got = false;
+    const onTilt = (e) => {
+      if (e.beta == null || e.gamma == null) return;
+      got = true;
+      const so = window.screen.orientation;
+      const angle = so && typeof so.angle === 'number' ? so.angle : (window.orientation || 0);
+      const tilt = screenTilt(e.beta, e.gamma, angle);
+      if (!neutral || neutral.angle !== angle || recenter.current) { neutral = { ...tilt, angle }; recenter.current = false; sx = null; sy = null; }
+      const t = tiltToTarget(tilt, neutral);
+      sx = sx == null ? t.tx : sx + (t.tx - sx) * 0.35; // light smoothing against sensor jitter
+      sy = sy == null ? t.ty : sy + (t.ty - sy) * 0.35;
+      const now = performance.now();
+      if (now - last < 33) return; // about 30 updates a second is plenty (and kind to the network)
+      last = now;
+      api.current.apply({ tx: Math.round(sx), ty: Math.round(sy) });
+    };
+    window.addEventListener('deviceorientation', onTilt);
+    const watchdog = setTimeout(() => { if (!got) note('No motion data arrived. Check that motion sensors are allowed for this site.'); }, 2500);
+    return () => { window.removeEventListener('deviceorientation', onTilt); clearTimeout(watchdog); api.current.apply({ tx: null, ty: null }); };
+  }, [gyroOn]);
+
   const pix = pack.opts.pixel || 1;
   const toggleMute = () => { const m = !sfx.isMuted(); sfx.setMuted(m); setMuted(m); };
   const fullscreen = () => {
@@ -244,11 +303,18 @@ export default function Game({ mode, net, onExit, name, loadout, onRunEnd }) {
             ● {ping == null ? '…' : ping + ' ms'}
           </span>
         )}
+        {IS_TOUCH && gyroSupport() !== 'unsupported' && <button className={gyroOn ? 'on' : ''} onClick={toggleGyro} aria-label="Gyroscope steering">🧭</button>}
+        {gyroOn && <button onClick={() => { recenter.current = true; }} aria-label="Recentre gyroscope">⟲</button>}
         <button onClick={toggleMute} aria-label="Toggle sound">{muted ? '🔇' : '🔊'}</button>
         {IS_TOUCH && <button onClick={fullscreen} aria-label="Fullscreen">⛶</button>}
         <button onClick={onExit} aria-label="Leave">✕</button>
       </div>
-      {IS_TOUCH && <Controls apply={(p) => api.current.apply(p)} />}
+      {gyroNote && (
+        <div className="gyronote">
+          {gyroNote.text}{gyroNote.link && <> <a href={gyroNote.link}>Open secure version</a></>}
+        </div>
+      )}
+      {IS_TOUCH && <Controls stick={!gyroOn} apply={(p) => api.current.apply(p)} />}
     </div>
   );
 }

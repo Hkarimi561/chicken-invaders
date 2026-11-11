@@ -41,6 +41,29 @@ Environment: `PORT` (default 3000), `DATA_DIR` (default `/data` in the image).
 - Profiles are stored on the server (`data/profiles.json`, not committed). The secret profile code in the
   shop lets you use the same account on another device.
 
+## Leaderboard and rating
+
+Menu -> *Leaderboard*. Two separate boards, each with *Rating*, *Best score*, *Best wave* and *This week*:
+
+- **Online** runs are counted by the server's own simulation, so they are verified.
+- **Solo** runs are simulated in your browser, so the server only accepts a score and wave that the elapsed
+  time makes plausible (it caps both). Treat solo scores as best-effort.
+
+**Rating** is the average of your best five runs (a run is worth its score plus 150 per wave), so one lucky run
+cannot dominate. Your pilot name is public; profile codes never are. Results are stored with the profile in
+`data/profiles.json`.
+
+## Gyroscope steering (phones and tablets)
+
+Tap the compass button in the game to steer by tilting the device (the pose you hold when you switch it on is the
+centre; tap the recentre button to reset it). FIRE stays on screen.
+
+Browsers only expose motion sensors on **secure pages**, so over a plain `http://<lan-ip>:3000` address the button
+explains this. The server therefore also listens on `https://<lan-ip>:3443` with a self-signed certificate
+(created on first start, kept in `data/`): open it once and choose to continue past the browser warning. The menu
+has a link that carries your profile over (in the URL fragment, never sent to the server). iOS asks for motion
+permission the first time. Set `HTTPS=0` to turn the secure listener off, or `HTTPS_PORT` to change the port.
+
 ## Seasonal events
 
 The game restyles itself by date: **Halloween** (Oct 15 – Nov 2), **Winter Holidays** (Dec 10 – Jan 3),

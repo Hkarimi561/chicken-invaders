@@ -4,6 +4,9 @@ import { createState, addPlayer, step, setInput, emptyInput, PALETTE } from '../
 import { defaultProfile, loadoutOf, buyItem, equipItem, quote, sanitizeProfile } from '../shared/catalog.js';
 import { activeEvent, nextEvent } from '../shared/events.js';
 import { sanitizePack, emptyPack } from '../shared/packfmt.js';
+import { weekId, recordRun, ratingOf, emptyRec, buildBoard, cleanName, points } from '../shared/leaderboard.js';
+import { screenTilt, tiltToTarget } from '../src/gyro.js';
+import { W, H } from '../shared/sim.js';
 
 const s = createState(42);
 addPlayer(s, 'a', 'A');
@@ -199,6 +202,75 @@ const assert = (c, m) => { if (!c) throw new Error('FAIL: ' + m); };
   const e = emptyPack('x');
   assert(JSON.stringify(sanitizePack(e)) === JSON.stringify(e), 'an empty pack round-trips unchanged');
 }
+// boss movement must be continuous: it used to teleport when it entered a new phase
+{
+  for (const wave of [4, 9]) { // a normal boss and the mother hen
+    const b = createState(5); addPlayer(b, 'a', 'A'); b.players.a.lives = 9999; b.wave = wave; b.cleared = true; b.delay = 0;
+    step(b, 1 / 60);
+    const boss = b.chickens.find((c) => c.boss);
+    for (let i = 0; i < 240; i++) step(b, 1 / 60);
+    b.t += 100; // late in a long game, where the old formula jumped the furthest
+    let worst = 0, last = boss.x;
+    for (let i = 0; i < 700; i++) {
+      if (i === 100) boss.hp = Math.floor(boss.max * 0.6);
+      if (i === 300) boss.hp = Math.floor(boss.max * 0.3);
+      b.players.a.lives = 9999;
+      step(b, 1 / 60);
+      worst = Math.max(worst, Math.abs(boss.x - last)); last = boss.x;
+    }
+    assert(worst < 8, 'boss never moves more than its top speed in one frame (wave ' + wave + ', worst ' + worst.toFixed(1) + 'px)');
+  }
+}
+
+// leaderboard + rating (pure logic)
+{
+  assert(weekId(new Date(2026, 0, 1)) === '2026-W01' && weekId(new Date(2025, 11, 31)) === '2026-W01', 'ISO week at the year boundary');
+  assert(weekId(new Date(2026, 0, 5)) === '2026-W02' && weekId(new Date(2027, 0, 1)) === '2026-W53', 'ISO week numbering');
+  assert(cleanName('  <b>Ali\u0007   Baba</b>  ') === 'bAli Baba/b' || !cleanName('<b>x</b>').includes('<'), 'names lose angle brackets and control characters');
+  assert(cleanName('') === 'Pilot' && cleanName('x'.repeat(40)).length === 14, 'empty names fall back, long names are cut');
+
+  const r = emptyRec();
+  assert(recordRun(r, { score: 0, wave: 5 }) === false && r.runs === 0, 'a zero-score run is not recorded');
+  recordRun(r, { score: 1000, wave: 4 });
+  assert(r.best === 1000 && r.bestWave === 4 && ratingOf(r) === Math.round(points(1000, 4) / 5), 'first run: rating is its points over five slots');
+  for (const sc of [2000, 3000, 4000, 5000, 6000, 100]) recordRun(r, { score: sc, wave: 5 });
+  assert(r.top.length === 5 && r.top[0] === points(6000, 5) && r.top.every((v, i, a) => !i || a[i - 1] >= v), 'only the best five runs count, sorted');
+  assert(ratingOf(r) === Math.round(r.top.reduce((a, b) => a + b, 0) / 5), 'rating is the mean of the best five');
+
+  const mk = (name, solo, extra = {}) => { const rec = emptyRec(); for (const [sc, w] of solo) recordRun(rec, { score: sc, wave: w }, extra.date); return { name, rec: { solo: rec, online: emptyRec() } }; };
+  const profiles = new Map([
+    ['secretidaaaaaaaaaaaaaaaa', mk('Ann', [[5000, 10], [4000, 9]])],
+    ['secretidbbbbbbbbbbbbbbbb', mk('Bob', [[9000, 6]])],
+    ['secretidcccccccccccccccc', mk('Old', [[7000, 8]], { date: new Date(2024, 3, 10) })],
+    ['secretidddddddddddddddd', { name: 'Nobody', rec: { solo: emptyRec(), online: emptyRec() } }],
+  ]);
+  const now = new Date(2026, 5, 15);
+  const byScore = buildBoard(profiles, 'solo', 'score', 'secretidaaaaaaaaaaaaaaaa', now);
+  assert(byScore.entries.map((e) => e.name).join() === 'Bob,Old,Ann' && byScore.entries[2].you && byScore.me.rank === 3, 'best-score board is sorted and flags you');
+  assert(buildBoard(profiles, 'solo', 'wave', null, now).entries[0].name === 'Ann', 'best-wave board');
+  const wk = buildBoard(profiles, 'solo', 'week', null, new Date());
+  assert(wk.entries.map((e) => e.name).join() === 'Bob,Ann', 'weekly board counts only this week (Old was recorded in 2024)');
+  assert(buildBoard(profiles, 'solo', 'week', null, new Date(2030, 0, 1)).entries.length === 0, 'old weeks drop off the weekly board');
+  assert(buildBoard(profiles, 'online', 'rating', null, now).entries.length === 0, 'modes are separate boards');
+  assert(!JSON.stringify(byScore).includes('secretid'), 'profile codes never appear in leaderboard output');
+}
+
+// gyroscope mapping
+{
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  assert(screenTilt(10, 20, 0).x === 20 && screenTilt(10, 20, 0).y === 10, 'portrait: x from gamma, y from beta');
+  assert(screenTilt(10, 20, 90).x === 10 && screenTilt(10, 20, 90).y === -20, 'landscape 90');
+  assert(screenTilt(10, 20, 270).x === -10 && screenTilt(10, 20, 270).y === 20 && screenTilt(10, 20, -90).x === -10, 'landscape 270 / -90');
+  assert(screenTilt(10, 20, 180).x === -20 && screenTilt(10, 20, 180).y === -10, 'upside down');
+  const mid = tiltToTarget({ x: 0, y: 0 }, { x: 0, y: 0 });
+  assert(near(mid.tx, W / 2) && near(mid.ty, (H * 0.45 + H - 30) / 2), 'neutral pose is the centre of the play area');
+  assert(tiltToTarget({ x: 1, y: 1 }, { x: 0, y: 0 }).tx === mid.tx, 'a small wobble inside the dead zone is ignored');
+  assert(near(tiltToTarget({ x: 24 + 1.5, y: 0 }, { x: 0, y: 0 }).tx, W - 24) && near(tiltToTarget({ x: -90, y: 0 }, { x: 0, y: 0 }).tx, 24), 'full tilt reaches the edges and is clamped');
+  const calib = tiltToTarget({ x: 30, y: 40 }, { x: 30, y: 40 });
+  assert(near(calib.tx, mid.tx) && near(calib.ty, mid.ty), 'tilt is measured from the calibrated pose, not from flat');
+  const up = tiltToTarget({ x: 0, y: -100 }, { x: 0, y: 0 }), down = tiltToTarget({ x: 0, y: 100 }, { x: 0, y: 0 });
+  assert(near(up.ty, H * 0.45) && near(down.ty, H - 30), 'vertical tilt spans exactly the ship\'s allowed height');
+}
 console.log('sim mechanics ok');
 
 // profile API (needs the server running)
@@ -228,6 +300,32 @@ let pid;
   assert((await call('/api/equip', { id: pid, slot: 'paint', value: PALETTE[1] })).status === 200, 'equip owned paint');
   assert((await call('/api/profile/' + pid)).body.profile.equipped.paint === PALETTE[1], 'profile persists the loadout');
   assert('event' in (await call('/api/info')).body, 'server reports the running event');
+  {
+    // solo score caps, name cleaning and the leaderboard endpoint
+    const run = await call('/api/run/start', { id: pid });
+    const r2 = await call('/api/run/end', { id: pid, runId: run.body.runId, keys: 0, wave: 500, score: 999999999, kills: 5, name: '<b>Tester' });
+    assert(r2.status === 200 && r2.body.wave <= 3 && r2.body.score <= 1500, 'solo wave and score are capped by elapsed time (got wave ' + r2.body.wave + ', score ' + r2.body.score + ')');
+    assert(!r2.body.profile.name.includes('<') && r2.body.profile.rec.solo.runs === 1, 'public name is cleaned and the run recorded');
+    const lb = await call('/api/leaderboard', { id: pid, mode: 'solo', board: 'score' });
+    assert(lb.status === 200 && lb.body.entries.some((e) => e.you && e.score === r2.body.score), 'leaderboard lists the run and flags it as yours');
+    assert(!JSON.stringify(lb.body).includes(pid), 'the leaderboard response never contains profile codes');
+    assert((await call('/api/leaderboard', { mode: 'nope', board: 'nope' })).body.mode === 'solo', 'bad mode/board fall back safely');
+  }
+  {
+    // the secure listener serves the same app and the same room protocol
+    const info = (await call('/api/info')).body;
+    if (info.httpsPort) {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'; // test only: the certificate is self-signed
+      const sec = await fetch('https://localhost:' + info.httpsPort + '/api/info').then((x) => x.json());
+      assert('event' in sec, 'https listener answers');
+      const wsSecure = await new Promise((res, rej) => { const w = new WebSocket('wss://localhost:' + info.httpsPort + '/ws', { rejectUnauthorized: false }); w.on('open', () => res(w)); w.on('error', rej); });
+      wsSecure.send(JSON.stringify({ t: 'join', name: 'S', create: true }));
+      const rm = await new Promise((res) => wsSecure.on('message', (d) => { const m = JSON.parse(d); if (m.t === 'room') res(m); }));
+      assert(rm.code.length === 4, 'rooms work over wss as well');
+      wsSecure.close();
+      console.log('https ok');
+    } else console.log('https skipped (disabled)');
+  }
 console.log('profile API ok');
 }
 

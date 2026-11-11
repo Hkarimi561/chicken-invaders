@@ -4,6 +4,7 @@ services:
     image: chicken-blasters:latest
     ports:
       - "3000:3000"   # open http://<this-machine-ip>:3000 from any device on your network
+      - "3443:3443"   # https (self-signed): needed for gyroscope steering on phones
     environment:
       PORT: "3000"
       DATA_DIR: /data

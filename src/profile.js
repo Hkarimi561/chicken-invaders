@@ -18,8 +18,21 @@ async function api(path, body) {
 
 export const offlineProfile = () => ({ ...defaultProfile(), offline: true });
 
+/**
+ * Opening the secure (https) address of this game starts on a different origin with empty storage, so the menu
+ * link carries the profile code in the URL fragment (#p=...). A fragment is never sent to the server or logged;
+ * it is read once here and removed from the address bar.
+ */
+function adoptHashProfile() {
+  const m = /[#&]p=([a-f0-9]{24})/.exec(location.hash || '');
+  if (!m) return;
+  setPid(m[1]);
+  try { history.replaceState(null, '', location.pathname + location.search); } catch { /* ignore */ }
+}
+
 /** Loads (or creates) the profile for this device. */
 export async function loadProfile() {
+  adoptHashProfile();
   const j = await api('/api/profile', { id: getPid() });
   setPid(j.id);
   return j.profile;
@@ -28,7 +41,9 @@ export const buy = (item) => api('/api/buy', { id: getPid(), item }).then((j) =>
 export const equip = (slot, value) => api('/api/equip', { id: getPid(), slot, value }).then((j) => j.profile);
 export const claim = () => api('/api/claim', { id: getPid() }).then((j) => ({ profile: j.profile, claimed: j.claimed }));
 export const startRun = () => api('/api/run/start', { id: getPid() }).then((j) => j.runId);
-export const endRun = (runId, keys, wave) => api('/api/run/end', { id: getPid(), runId, keys, wave }).then((j) => j);
+export const endRun = (runId, run) => api('/api/run/end', { id: getPid(), runId, ...run }).then((j) => j);
+/** Leaderboard rows for a mode and board; the server flags your own row with 'you'. */
+export const leaderboard = (mode, board) => api('/api/leaderboard', { id: getPid(), mode, board });
 
 /** Use a code from another device so keys and unlocks follow you. */
 export async function useCode(code) {

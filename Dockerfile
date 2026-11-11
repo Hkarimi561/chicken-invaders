@@ -27,7 +27,7 @@ RUN mkdir -p /data && chown -R node:node /data /app
 VOLUME ["/data"]
 USER node
 
-EXPOSE 3000
+EXPOSE 3000 3443
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${PORT}/api/info" >/dev/null || exit 1
 

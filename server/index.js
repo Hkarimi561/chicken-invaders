@@ -1,14 +1,17 @@
 import http from 'node:http';
+import https from 'node:https';
 import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import selfsigned from 'selfsigned';
 import { WebSocketServer } from 'ws';
 import { createState, addPlayer, removePlayer, setInput, step, emptyInput, W, H } from '../shared/sim.js';
 import { buyItem, equipItem, loadoutOf, sanitizeProfile, defaultProfile } from '../shared/catalog.js';
 import { EVENTS, activeEvent } from '../shared/events.js';
+import { recordRun, buildBoard, cleanName } from '../shared/leaderboard.js';
 
 const PORT = Number(process.env.PORT) || 3000;
 const MAX_PLAYERS = 4;
@@ -17,6 +20,8 @@ const dist = path.join(__dirname, '..', 'dist');
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
 const FILE = path.join(DATA_DIR, 'profiles.json');
 const ID_RE = /^[a-f0-9]{24}$/;
+const HTTPS_PORT = Number(process.env.HTTPS_PORT) || 3443;
+const HTTPS_ON = process.env.HTTPS !== '0'; // HTTPS=0 turns the secure listener off
 // The running seasonal event (decides when limited-time shop skins can be bought). EVENT_OVERRIDE=halloween forces one.
 const serverEvent = () => (EVENTS[process.env.EVENT_OVERRIDE] ? process.env.EVENT_OVERRIDE : activeEvent(new Date()));
 
@@ -25,6 +30,24 @@ export function lanAddresses() {
   for (const list of Object.values(os.networkInterfaces()))
     for (const i of list || []) if (i.family === 'IPv4' && !i.internal) out.push(i.address);
   return out;
+}
+
+// A self-signed certificate (kept in the data folder so the browser's "continue anyway" choice keeps working).
+// It exists so phones on your network can use features that need a secure page, such as gyroscope steering.
+function loadCert() {
+  const file = path.join(DATA_DIR, 'https-cert.json');
+  const hosts = ['localhost', '127.0.0.1', ...lanAddresses()];
+  try {
+    const c = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (c.hosts?.join() === hosts.join() && c.expires > Date.now() + 7 * 86400000) return c;
+  } catch { /* generate below */ }
+  const altNames = hosts.map((h) => (/^\d+\.\d+\.\d+\.\d+$/.test(h) ? { type: 7, ip: h } : { type: 2, value: h }));
+  const pems = selfsigned.generate([{ name: 'commonName', value: 'chicken-blasters.local' }], {
+    days: 365, keySize: 2048, algorithm: 'sha256', extensions: [{ name: 'subjectAltName', altNames }],
+  });
+  const c = { key: pems.private, cert: pems.cert, hosts, expires: Date.now() + 364 * 86400000 };
+  try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.writeFileSync(file, JSON.stringify(c)); } catch { /* not fatal */ }
+  return c;
 }
 
 // ---------- persistent profiles (the "global" account: keys, unlocks, loadout) ----------
@@ -78,7 +101,7 @@ function creditPending(profile, keys, wave) {
 const app = express();
 app.use(express.json({ limit: '10kb' }));
 app.use(express.static(dist));
-app.get('/api/info', (_req, res) => res.json({ port: PORT, addresses: lanAddresses(), event: serverEvent() }));
+app.get('/api/info', (_req, res) => res.json({ port: PORT, addresses: lanAddresses(), event: serverEvent(), httpsPort: httpsServer ? HTTPS_PORT : null }));
 
 const hits = new Map(); // tiny per-IP rate limit for the mutating API
 app.use('/api', (req, res, next) => {
@@ -139,16 +162,36 @@ app.post('/api/run/end', (req, res) => {
   if (!run || run.pid !== w.id || run.done) return fail(res, 400, 'Run already submitted or unknown');
   run.done = true;
   const elapsed = (Date.now() - run.start) / 1000;
-  const wave = Math.min(999, Math.max(0, Math.floor(Number(req.body?.wave) || 0)));
+  // Solo runs are simulated in the browser, so the server only accepts what elapsed time makes plausible.
+  const maxWave = Math.floor(elapsed / 4) + 2;
+  const wave = Math.min(maxWave, 999, Math.max(0, Math.floor(Number(req.body?.wave) || 0)));
+  const reportedScore = Math.max(0, Math.floor(Number(req.body?.score) || 0));
+  const score = Math.min(reportedScore, Math.floor(400 * elapsed + 600 * wave + 200));
   const reported = Math.max(0, Math.floor(Number(req.body?.keys) || 0));
   const cap = Math.min(3 + Math.ceil(elapsed / KEY_RATE_SECONDS), 5 + wave * 6);
   const credited = Math.min(reported, cap);
   creditPending(w.p, credited, wave);
-  res.json({ profile: w.p, credited });
+  w.p.name = cleanName(req.body?.name);
+  recordRun(w.p.rec.solo, { score, wave });
+  save();
+  res.json({ profile: w.p, credited, score, wave });
+});
+
+// The leaderboard never exposes profile codes: your own rows are flagged with "you".
+app.post('/api/leaderboard', (req, res) => {
+  const id = String(req.body?.id || '');
+  const self = ID_RE.test(id) && profiles.has(id) ? id : null;
+  res.json(buildBoard(profiles, String(req.body?.mode), String(req.body?.board), self, new Date(), 50));
 });
 
 const server = http.createServer(app);
+let httpsServer = null;
+if (HTTPS_ON) {
+  try { const c = loadCert(); httpsServer = https.createServer({ key: c.key, cert: c.cert }, app); }
+  catch (e) { console.error('HTTPS disabled (could not create a certificate):', e.message); }
+}
 const wss = new WebSocketServer({ server, path: '/ws' });
+const wssSecure = httpsServer ? new WebSocketServer({ server: httpsServer, path: '/ws' }) : null;
 const rooms = new Map();
 let nextId = 1;
 
@@ -176,13 +219,28 @@ function creditPlayer(ws, room) {
   if (!p || !prof) return;
   const fresh = Math.max(0, (p.keys || 0) - (ws.creditedKeys || 0));
   ws.creditedKeys = p.keys || 0;
-  if (fresh > 0 || !ws.runCounted) { creditPending(prof, fresh, room.state.wave); ws.runCounted = true; }
+  if (fresh > 0) { prof.pending += fresh; prof.stats.totalKeys += fresh; save(); }
+}
+
+// Records an online run once per game, from the server's own score for that pilot.
+function finishRun(ws, room) {
+  const p = room.state?.players[ws.pid];
+  const prof = ws.profileId && profiles.get(ws.profileId);
+  if (!p || !prof || ws.runRecorded) return;
+  ws.runRecorded = true;
+  if (recordRun(prof.rec.online, { score: p.score, wave: room.state.wave })) {
+    prof.name = cleanName(ws.pname); // the public name only changes when a run is actually recorded
+    prof.stats.runs += 1;
+    prof.stats.bestWave = Math.max(prof.stats.bestWave, room.state.wave);
+    save();
+  }
 }
 
 function leave(ws) {
   const room = ws.room;
   if (!room) return;
   creditPlayer(ws, room);
+  finishRun(ws, room);
   room.clients.delete(ws);
   if (room.state) removePlayer(room.state, ws.pid);
   ws.room = null;
@@ -195,7 +253,7 @@ function startGame(room) {
   room.state = createState();
   room.overHandled = false;
   for (const c of room.clients) {
-    c.creditedKeys = 0; c.runCounted = false;
+    c.creditedKeys = 0; c.runRecorded = false;
     addPlayer(room.state, c.pid, c.pname, clientLoadout(c));
   }
   room.phase = 'playing';
@@ -208,7 +266,7 @@ const round2 = (_k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.
 
 const num = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(v, Math.max(W, H))) : null);
 
-wss.on('connection', (ws) => {
+const onConnection = (ws) => {
   ws.pid = 'p' + nextId++;
   ws.pname = 'Pilot';
   ws.room = null;
@@ -233,7 +291,7 @@ wss.on('connection', (ws) => {
       }
       room.clients.add(ws);
       ws.room = room;
-      if (room.state) { addPlayer(room.state, ws.pid, ws.pname, clientLoadout(ws)); ws.creditedKeys = 0; ws.runCounted = false; } // late join
+      if (room.state) { addPlayer(room.state, ws.pid, ws.pname, clientLoadout(ws)); ws.creditedKeys = 0; ws.runRecorded = false; } // late join
       if (room.state) send(ws, { t: 'state', s: room.state });
       broadcastRoom(room);
     } else if (ws.room) {
@@ -254,7 +312,9 @@ wss.on('connection', (ws) => {
     }
   });
   ws.on('close', () => leave(ws));
-});
+};
+wss.on('connection', onConnection);
+wssSecure?.on('connection', onConnection);
 
 // 60Hz simulation, 30Hz snapshots
 setInterval(() => {
@@ -263,7 +323,7 @@ setInterval(() => {
     step(room.state, 1 / 60);
     if (room.state.over && !room.overHandled) { // run finished: credit everyone's keys
       room.overHandled = true;
-      for (const c of room.clients) creditPlayer(c, room);
+      for (const c of room.clients) { creditPlayer(c, room); finishRun(c, room); }
     }
     if (++room.tick % 2 === 0) {
       const msg = JSON.stringify({ t: 'state', s: room.state }, round2);
@@ -277,3 +337,10 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`  Local:   http://localhost:${PORT}`);
   for (const a of lanAddresses()) console.log(`  Network: http://${a}:${PORT}`);
 });
+
+if (httpsServer) {
+  httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {
+    console.log('  Secure (needed for gyroscope, self-signed certificate): https://localhost:' + HTTPS_PORT);
+    for (const a of lanAddresses()) console.log('  Secure network: https://' + a + ':' + HTTPS_PORT);
+  });
+}

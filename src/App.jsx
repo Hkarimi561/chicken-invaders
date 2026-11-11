@@ -12,6 +12,8 @@ import { resetFx } from './fx.js';
 import * as store from './profile.js';
 import { quality, IS_TOUCH } from './util.js';
 import PackEditor from './PackEditor.jsx';
+import Leaderboard from './Leaderboard.jsx';
+import { ratingOf } from '../shared/leaderboard.js';
 import { theme, initTheme, setEventMode } from './theme.js';
 import { loadActivePack } from './packs.js';
 import { EVENTS, activeEvent, nextEvent, fmtWindow } from '../shared/events.js';
@@ -276,6 +278,8 @@ export default function App() {
   const [evMode, setEvMode] = useState(theme.mode);
   const net = useRef(null);
   const runRef = useRef(null);
+  const nameRef = useRef(name);
+  nameRef.current = name;
 
   const refresh = useCallback(() => store.loadProfile().then(setProfile).catch(() => setProfile(store.offlineProfile())), []);
   useEffect(() => { fetch('/api/info').then((r) => r.json()).then(setInfo).catch(() => {}); refresh(); }, [refresh]);
@@ -301,11 +305,11 @@ export default function App() {
     store.startRun().then((id) => { runRef.current = id; }).catch(() => {});
     setScreen('single');
   };
-  const onRunEnd = useCallback(({ keys, wave, over }) => {
+  const onRunEnd = useCallback(({ keys, wave, over, score, kills }) => {
     const id = runRef.current;
     runRef.current = null;
     if (over) store.startRun().then((i) => { runRef.current = i; }).catch(() => {}); // the player may restart
-    if (id) store.endRun(id, keys, wave).then((j) => setProfile(j.profile)).catch(() => {});
+    if (id) store.endRun(id, { keys, wave, score, kills, name: nameRef.current }).then((j) => setProfile(j.profile)).catch(() => {});
   }, []);
 
   const join = (create) => {
@@ -327,15 +331,22 @@ export default function App() {
     if (local && info?.addresses?.[0]) return `http://${info.addresses[0]}:${location.port || info.port}`;
     return location.origin;
   }, [info]);
+  // The https:// twin of this page (self-signed certificate). Needed for gyroscope steering on phones; the
+  // profile code travels in the URL fragment because the secure address is a different origin.
+  const secureUrl = info?.httpsPort && location.protocol === 'http:'
+    ? 'https://' + location.hostname + ':' + info.httpsPort + '/#p=' + store.getPid()
+    : null;
   const lan = info?.addresses?.map((a) => `http://${a}:${location.port || info.port}`) || [];
 
   if (screen === 'single')
-    return <Shell><Game mode="single" name={name} loadout={loadout} onRunEnd={onRunEnd} onExit={exitSingle} /><Hint /></Shell>;
+    return <Shell><Game mode="single" name={name} loadout={loadout} onRunEnd={onRunEnd} onExit={exitSingle} secureUrl={secureUrl} /><Hint /></Shell>;
   if (screen === 'multi' && room && net.current?.state)
-    return <Shell><Game mode="multi" net={net.current} onExit={leave} /><Hint room={room} /></Shell>;
+    return <Shell><Game mode="multi" net={net.current} onExit={leave} secureUrl={secureUrl} /><Hint room={room} /></Shell>;
 
   if (screen === 'shop')
     return <Shell><Attract /><Shop profile={profile} setProfile={setProfile} event={info && 'event' in info ? info.event : activeEvent()} onBack={() => { setScreen('menu'); refresh(); }} /></Shell>;
+  if (screen === 'board')
+    return <Shell><Attract /><Leaderboard profile={profile} onBack={() => { setScreen('menu'); refresh(); }} /></Shell>;
   if (screen === 'packs')
     return <Shell><Attract /><PackEditor onBack={() => setScreen('menu')} /></Shell>;
 
@@ -377,9 +388,11 @@ export default function App() {
           <ShipView opts={shipOpts(loadout)} />
           <div className="hangar-opts">
             <Keys n={profile.keys} />
+            <span className="keychip rating" title="Average of your best five runs">★ {Math.max(ratingOf(profile.rec?.solo || { top: [] }), ratingOf(profile.rec?.online || { top: [] }))}</span>
             {profile.pending > 0 && <button className="small" disabled={!!profile.offline} onClick={() => store.claim().then((r) => setProfile(r.profile)).catch(() => {})}>Claim 🔑 {profile.pending}</button>}
             <button className="ghost" onClick={() => setScreen('shop')}>Hangar &amp; Shop</button>
             <button className="ghost" onClick={() => setScreen('packs')}>Resource packs</button>
+            <button className="ghost" onClick={() => setScreen('board')}>Leaderboard</button>
             <p className="sub tiny">Every pilot starts with the standard plane. Find 🔑 in battle to upgrade it.</p>
           </div>
         </div>
@@ -397,6 +410,7 @@ export default function App() {
         {lan.length > 0 && <p className="sub">LAN address: {lan.join('  ')}</p>}
         <p className="sub">Keyboard: WASD / arrows + Space · Mouse: move to steer, hold left button to fire · Mute: M · Pause: P · Leave: Esc · Touch: stick + FIRE</p>
         <p className="sub">Co-op: fly over a downed teammate for 1.5s to revive them.</p>
+        {IS_TOUCH && secureUrl && <p className="sub">Gyroscope steering needs a secure page: <a href={secureUrl}>open the secure version</a> (your browser will warn about the self-signed certificate; choose to continue).</p>}
       </div>
     </Shell>
   );
