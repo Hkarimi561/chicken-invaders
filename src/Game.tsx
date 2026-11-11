@@ -5,6 +5,7 @@ import { draw } from './render';
 import { resetFx, timeScale } from './fx';
 import * as sfx from './audio';
 import { quality, IS_TOUCH, toggleFullscreen, exitFullscreen } from './util';
+import { startQuality, setQuality, autoQuality } from './perf';
 import { pack } from './packs';
 import { theme } from './theme';
 import { settings, STICK_PX } from './settings';
@@ -16,14 +17,6 @@ const KEYS = {
   ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down', Space: 'fire',
   KeyE: 'ab', ShiftLeft: 'ab', ShiftRight: 'ab',
 };
-// Phones start one quality step down; a device that can't keep up is lowered further (and remembered).
-function initialQuality() {
-  const def = IS_TOUCH ? 1 : 2;
-  let saved = NaN;
-  try { saved = Number(localStorage.getItem('cb-q')); } catch { /* private mode */ }
-  return Number.isInteger(saved) && saved >= 0 && saved <= 2 ? Math.min(saved, def) : def;
-}
-
 // Touch controls. The joystick is *floating*: put your thumb anywhere on that half of the screen and the stick
 // appears right under it (steer by dragging, lift to hide it). It keeps no React state: the knob moves with a
 // transform and the centre is the touch point, so dragging never triggers a re-render or a layout.
@@ -251,16 +244,16 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
     window.addEventListener('pointerup', mouseUp);
 
     // Adaptive quality: if frames keep taking too long on this device, drop effects and remember the choice.
-    quality.level = initialQuality();
+    setQuality(startQuality());
     let last = performance.now(), acc = 0, raf, ema = 16.7, frames = 0, lastChange = 0, moodKey = '', lastP = -1, lastReady = false;
     const frame = (now) => {
+      if (now - last < 13) { raf = requestAnimationFrame(frame); return; } // 120/144 Hz screens: draw at most ~70 times a second
       const rawMs = now - last;
       const real = Math.min(0.1, rawMs / 1000); last = now;
-      if (rawMs < 250 && ++frames > 40) { // ignore warm-up and tab-switch spikes
-        ema = ema * 0.92 + rawMs * 0.08;
-        if (ema > 26 && quality.level > 0 && now - lastChange > 1500) {
-          quality.level--; lastChange = now; ema = 16.7;
-          if (IS_TOUCH) { try { localStorage.setItem('cb-q', String(quality.level)); } catch { /* ignore */ } }
+      if (rawMs < 250 && ++frames > 30 && autoQuality()) { // ignore warm-up and tab-switch spikes; a fixed Graphics choice is never changed
+        ema = ema * 0.9 + rawMs * 0.1;
+        if (ema > 21 && quality.level > 0 && now - lastChange > 1200) { // under ~48 fps: step down and remember it on this device
+          setQuality(quality.level - 1, true); lastChange = now; ema = 16.7;
         }
       }
       if (s) {
@@ -301,7 +294,7 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
         ctx.setTransform(1 / pix, 0, 0, 1 / pix, 0, 0);
         ctx.imageSmoothingEnabled = pix === 1;
         draw(ctx, s, me, now / 1000, { paused, quiet: isReplay, replay: isReplay });
-        if (amb.current && (ambFrame++ % 5 === 0)) { try { ambCtx ??= amb.current.getContext('2d'); ambCtx.drawImage(cv.current, 0, 0, 48, 36); } catch { /* ignore */ } }
+        if (amb.current && quality.level >= 3 && (ambFrame++ % 6 === 0)) { try { ambCtx ??= amb.current.getContext('2d'); ambCtx.drawImage(cv.current, 0, 0, 48, 36); } catch { /* ignore */ } }
         if (single && s.over && !reported) {
           if (recRef.current) { recRef.current.score = s.players.me?.score || 0; recRef.current.wave = s.wave; }
           setOverInfo({ canSave: !!recRef.current && recRef.current.inputs.length > 0 });

@@ -329,3 +329,14 @@ details.muts summary { cursor: pointer; font-size: 13px; }
 .cotd { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(255, 213, 79, .5); background: rgba(255, 213, 79, .08); }
 .cotd-icon { font-size: 34px; line-height: 1; flex: none; }
 .cotd > div { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+
+/* ---- PWA: update bar + reload ---- */
+.updatebar { position: fixed; left: 50%; top: max(10px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 1100; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 999px; background: rgba(16, 22, 54, .97); border: 1px solid #ffb300; font-size: 14px; font-weight: 600; box-shadow: 0 6px 24px rgba(0, 0, 0, .5); max-width: 94vw; }
+.mm .menugrid button.accent { border-color: #ffb300; color: #ffd54f; }
+
+/* ---- low-effects mode (Graphics: Low/Medium, or Auto after a slowdown): no blur filters, which old GPUs struggle with ---- */
+.lowfx .card, .lowfx .shop, .lowfx .mm-col, .lowfx .lobby { backdrop-filter: none; -webkit-backdrop-filter: none; background-color: rgba(14, 20, 50, .95); }
+.lowfx .stage.full .ambient { display: none; }
+.lowfx .stage.full .game { box-shadow: none; }
+.lowfx .mm { background: rgba(5, 8, 26, .55); }
+.lowfx .mm-brand h1 { text-shadow: none; }

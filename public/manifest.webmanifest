@@ -10,6 +10,9 @@
   "background_color": "#05081a",
   "theme_color": "#05081a",
   "categories": ["games"],
+  "shortcuts": [
+    { "name": "Reload / update", "short_name": "Reload", "description": "Fetch the latest version of the game", "url": "/?reload=1" }
+  ],
   "icons": [
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },

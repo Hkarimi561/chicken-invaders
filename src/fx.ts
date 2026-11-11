@@ -43,7 +43,7 @@ export function timeScale(realDt) {
 }
 
 export function burst(x, y, n, colors, speed = 220, size = 4, life = 0.7, type = 'spark') {
-  if (parts.length > (quality.level >= 2 ? 800 : quality.level === 1 ? 300 : 120)) return;
+  if (parts.length > (quality.level >= 3 ? 800 : quality.level === 2 ? 450 : quality.level === 1 ? 300 : 120)) return;
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2, v = speed * (0.3 + Math.random() * 0.9);
     parts.push({

@@ -1,5 +1,7 @@
 import { theme } from './theme';
 import { settings } from './settings';
+import { quality } from './util';
+const lite = () => quality.level < 2; // low quality: no clipping (clip paths are slow on old GPUs)
 
 // Ten funny chicken characters. Each regular chicken wears one, picked from its id so it stays the same
 // for its whole life. Drawn in the chicken's local coordinates (body centre 0,2; eyes at +-6.5,-6; head top near -22).
@@ -43,9 +45,9 @@ export function costumeFront(ctx, c, t) {
     ctx.fillStyle = '#ef5350'; ctx.beginPath(); ctx.arc(-5, 14.5, 1.5, 0, 7); ctx.fill();
     ctx.fillStyle = '#42a5f5'; ctx.beginPath(); ctx.arc(2, 14.5, 1.5, 0, 7); ctx.fill();
   } else if (k === 2) { // ninja: mask, red headband with a tail
-    ctx.save(); body(ctx); ctx.clip();
-    ctx.fillStyle = '#1b1b24'; ctx.fillRect(-20, -22, 40, 9);
-    ctx.fillStyle = '#e53935'; ctx.fillRect(-20, -13, 40, 3);
+    ctx.save(); if (!lite()) { body(ctx); ctx.clip(); }
+    ctx.fillStyle = '#1b1b24'; ctx.fillRect(-17, -22, 34, 9);
+    ctx.fillStyle = '#e53935'; ctx.fillRect(-17, -13, 34, 3);
     ctx.restore();
     ctx.strokeStyle = '#e53935'; ctx.lineWidth = 3; const w = Math.sin(t * 7 + c.id) * 3;
     ctx.beginPath(); ctx.moveTo(17, -12); ctx.lineTo(27, -9 + w); ctx.moveTo(17, -12); ctx.lineTo(26, -15 - w); ctx.stroke();
@@ -69,7 +71,7 @@ export function costumeFront(ctx, c, t) {
     ctx.beginPath(); ctx.moveTo(-12, -18); ctx.lineTo(10, -18); ctx.quadraticCurveTo(4, -30, 13, -46); ctx.quadraticCurveTo(-8, -34, -12, -18); ctx.closePath(); ctx.fill(); outline();
     ctx.fillStyle = '#ffd54f'; ctx.beginPath(); ctx.arc(0, -26, 2, 0, 7); ctx.arc(7, -35, 1.4, 0, 7); ctx.fill();
   } else if (k === 6) { // zombie: green skin, stitches, X eye
-    ctx.save(); body(ctx); ctx.clip(); ctx.fillStyle = 'rgba(110,190,95,.55)'; ctx.fillRect(-20, -22, 40, 30); ctx.restore();
+    ctx.save(); if (!lite()) { body(ctx); ctx.clip(); } ctx.fillStyle = 'rgba(110,190,95,.55)'; ctx.fillRect(-17, -22, 34, 30); ctx.restore();
     ctx.fillStyle = '#e8f5e9'; ctx.beginPath(); ctx.arc(-6.5, -6, 4.8, 0, 7); ctx.fill();
     ctx.strokeStyle = '#1b1b1b'; ctx.lineWidth = 1.8; ctx.beginPath(); ctx.moveTo(-9.5, -9); ctx.lineTo(-3.5, -3); ctx.moveTo(-3.5, -9); ctx.lineTo(-9.5, -3); ctx.stroke();
     ctx.strokeStyle = '#2e4d2a'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-1, -17); ctx.lineTo(13, -12);
@@ -89,7 +91,7 @@ export function costumeFront(ctx, c, t) {
     ctx.fillStyle = 'rgba(255,255,255,.9)'; ctx.font = 'bold 10px sans-serif';
     const z = (t * 0.8 + c.id * 0.37) % 1; ctx.globalAlpha = 1 - z; ctx.fillText('z', 14 + z * 6, -24 - z * 12); ctx.globalAlpha = 1;
   } else if (k === 9) { // robot: antenna, LED eyes, bolts, grille
-    ctx.save(); body(ctx); ctx.clip(); ctx.fillStyle = 'rgba(150,170,190,.5)'; ctx.fillRect(-20, -22, 40, 50); ctx.restore();
+    ctx.save(); if (!lite()) { body(ctx); ctx.clip(); } ctx.fillStyle = 'rgba(150,170,190,.5)'; ctx.fillRect(-17, -22, 34, 50); ctx.restore();
     ctx.strokeStyle = '#78879a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -20); ctx.lineTo(0, -31); ctx.stroke();
     ctx.fillStyle = Math.floor(t * 3 + c.id) % 2 ? '#ff5252' : '#7a1f1f'; ctx.beginPath(); ctx.arc(0, -33, 3, 0, 7); ctx.fill();
     for (const x of [-6.5, 6.5]) { ctx.fillStyle = '#7ee8ff'; ctx.fillRect(x - 4, -10, 8, 8); ctx.strokeStyle = '#25323f'; ctx.lineWidth = 1.2; ctx.strokeRect(x - 4, -10, 8, 8); ctx.fillStyle = '#25323f'; ctx.fillRect(x - 1.2, -7.2, 2.4, 2.4); }

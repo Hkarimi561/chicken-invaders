@@ -5,6 +5,7 @@ import { PALETTE, SKINS, TRAIL_INFO, SHOP_GUN_IDS } from '../shared/catalog';
 import { draw, drawShipPreview } from './render';
 import { resetFx } from './fx';
 import { quality, IS_TOUCH } from './util';
+import { startQuality } from './perf';
 
 export function QR({ text }: Record<string, any>) {
   const src = useMemo(() => {
@@ -40,8 +41,9 @@ export function Attract() {
   const cv = useRef(null);
   useEffect(() => {
     const ctx = cv.current.getContext('2d');
-    if (IS_TOUCH) quality.level = 0; // the menu backdrop is decoration: keep it cheap on phones
-    let s, startWave, raf, acc = 0, last = performance.now();
+    quality.level = IS_TOUCH ? 0 : Math.min(startQuality(), 1); // the menu backdrop is decoration: keep it cheap
+    let s, startWave, raf, acc = 0, last = performance.now(), skip = 0;
+    ctx.setTransform(0.5, 0, 0, 0.5, 0, 0); // drawn at a quarter of the pixels: it sits behind blurred panels anyway
     const pick = (a) => a[(Math.random() * a.length) | 0];
     const fresh = () => {
       resetFx();
@@ -66,12 +68,12 @@ export function Attract() {
     const frame = (now) => {
       acc += Math.min(0.1, (now - last) / 1000); last = now;
       while (acc >= 1 / 60) { think(); step(s, 1 / 60); acc -= 1 / 60; }
-      draw(ctx, s, 'bot', now / 1000, { silent: true });
+      if ((skip++ & 1) === 0) draw(ctx, s, 'bot', now / 1000, { silent: true }); // ~30 fps is plenty for a backdrop
       if (s.over || s.wave - startWave >= 3) fresh();
       raf = requestAnimationFrame(frame);
     };
     raf = requestAnimationFrame(frame);
     return () => { cancelAnimationFrame(raf); resetFx(); };
   }, []);
-  return <canvas ref={cv} width={W} height={H} className="attract" aria-hidden="true" />;
+  return <canvas ref={cv} width={W / 2} height={H / 2} className="attract" aria-hidden="true" />;
 }

@@ -20,6 +20,10 @@ import { TRAIL_INFO } from '../shared/catalog';
 import { detectEvents, ambient, updateParts, drawParts, shakeAmount, getFlare, getSummary, getCombo, heartLostAt, lensRings, spark, COMBO_COL } from './fx';
 
 // ---------- sprites ----------
+// Gradients in a chicken's local space can be shared by every chicken (the transform applies when filling), so they are
+// built once instead of ten times per chicken per frame.
+const gcache = new Map<string, any>();
+const gr = (key: string, make: () => any) => { let g = gcache.get(key); if (!g) { g = make(); gcache.set(key, g); } return g; };
 const vestCache: Record<string, any> = {};
 function vestOf(i) {
   if (!i) return null;
@@ -130,6 +134,81 @@ function bossExtras(ctx, c, t) {
   if (c.mini) { ctx.strokeStyle = 'rgba(210,150,255,.85)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(0, 0, 30, 0, 7); ctx.stroke(); }
 }
 
+// Everything about a chicken that does not move: extruded body, vest, shading, comb, beak and wattle.
+function paintBody(ctx, c, t, vest, panic, skin) {
+  const body = () => { ctx.beginPath(); ctx.ellipse(0, 2, 18, 20, 0, 0, 7); };
+  // body extrusion: stacked darker copies give thickness
+  for (let i = 5; i >= 1; i--) {
+    ctx.fillStyle = c.chick ? `rgb(${170 - i * 6},${130 - i * 6},${20})` : `rgb(${150 - i * 6},${120 - i * 6},${84 - i * 5})`;
+    ctx.beginPath(); ctx.ellipse(i * 0.9, 2 + i * 1.1, 18, 20, 0, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle = gr(c.chick ? 'bodyc' : 'bodyh', () => c.chick
+    ? radial(ctx, -7, -9, 2, 28, [[0, '#fffbd0'], [0.5, '#ffe36b'], [1, '#d9a21b']], 0, 2)
+    : radial(ctx, -7, -9, 2, 28, [[0, '#ffffff'], [0.5, '#f3e6d0'], [1, '#bd9a6a']], 0, 2));
+  body(); ctx.fill();
+  if (skin) bossBody(ctx, c, t);
+
+  // vest (clipped to the body so it wraps the belly)
+  if (vest) {
+    ctx.save(); body(); ctx.clip();
+    const vg = ctx.createLinearGradient(-18, 0, 18, 0);
+    vg.addColorStop(0, vest[1]); vg.addColorStop(0.35, vest[0]); vg.addColorStop(0.6, vest[0]); vg.addColorStop(1, vest[1]);
+    ctx.fillStyle = vg;
+    ctx.beginPath(); ctx.moveTo(-19, -1); ctx.lineTo(-5, 0); ctx.lineTo(0, 10); ctx.lineTo(5, 0); ctx.lineTo(19, -1); ctx.lineTo(19, 26); ctx.lineTo(-19, 26); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-5, 0); ctx.lineTo(0, 10); ctx.lineTo(5, 0); ctx.moveTo(0, 10); ctx.lineTo(0, 26); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,.35)';
+    ctx.beginPath(); ctx.moveTo(-19, -1); ctx.lineTo(-5, 0); ctx.stroke();
+    if (c.tier <= 2) for (const by of [14, 20]) {
+      ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.arc(-0.01, by, 1.9, 0, 7); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-0.6, by - 0.6, 0.6, 0, 7); ctx.fill();
+    }
+    vestDetail(ctx, c, vest);
+    if (settings.patterns) vestPattern(ctx, c.tier);
+    ctx.restore();
+  }
+
+  // ambient occlusion on belly + specular + rim
+  ctx.fillStyle = gr('ao', () => radial(ctx, 9, 16, 2, 26, [[0, 'rgba(10,10,40,.35)'], [1, 'rgba(10,10,40,0)']]));
+  body(); ctx.fill(); // no clip path needed: the gradient is painted straight onto the body shape
+  ctx.fillStyle = 'rgba(255,255,255,.55)';
+  ctx.beginPath(); ctx.ellipse(-8, -10, 4.5, 7, -0.5, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(130,160,255,.5)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.ellipse(0, 2, 18, 20, 0, 0.1, 1.3); ctx.stroke();
+  // comb (bevelled)
+  for (const [x, y, r] of [[-6, -19, 5], [0, -23, 6], [6, -19, 5]]) {
+    ctx.fillStyle = '#7f1313'; ctx.beginPath(); ctx.arc(x + 1, y + 1.5, r, 0, 7); ctx.fill();
+    ctx.fillStyle = gr('comb' + x, () => radial(ctx, x - 1.5, y - 2, 0.5, r + 1, [[0, '#ff8a80'], [1, '#c62828']]));
+    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+  }
+  // beak (two facets; open when panicking) + wattle
+  if (panic) { ctx.fillStyle = '#5a1010'; ctx.beginPath(); ctx.ellipse(0, 5.5, 3.4, 3.4, 0, 0, 7); ctx.fill(); }
+  const bo = panic ? 2.2 : 0;
+  ctx.fillStyle = '#ffb74d'; ctx.beginPath(); ctx.moveTo(-5, 1 - (panic ? 1 : 0)); ctx.lineTo(0, 1 - (panic ? 1 : 0)); ctx.lineTo(0, 7 - bo); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#ef6c00'; ctx.beginPath(); ctx.moveTo(0, 1 - (panic ? 1 : 0)); ctx.lineTo(5, 1 - (panic ? 1 : 0)); ctx.lineTo(0, 7 - bo); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = radial(ctx, -0.8, 11, 0.5, 4.5, [[0, '#ff8a80'], [1, '#c62828']]);
+  ctx.beginPath(); ctx.ellipse(0, 12 + bo, 2.6, 4, 0, 0, 7); ctx.fill();
+}
+
+// Cached images of regular chickens (one per tier / vest / damage look). Drawing an image is far cheaper than
+// ~60 path operations, which is what made a full wave slow on older PCs.
+const SPR_SCALE = 2, SPR_OX = 28, SPR_OY = 34, SPR_W = 56, SPR_H = 64;
+const sprCache = new Map<string, HTMLCanvasElement>();
+function chickenSprite(c, vest) {
+  const dmg = (c.max || 1) - (c.hp || 1);
+  const key = [c.chick ? 1 : 0, c.tier || 0, vest ? vest[0] : '', settings.patterns ? 1 : 0, dmg > 0 ? c.id + ':' + c.hp : 0].join('|');
+  let cv = sprCache.get(key);
+  if (!cv) {
+    if (sprCache.size > 240) sprCache.clear();
+    cv = document.createElement('canvas'); cv.width = SPR_W * SPR_SCALE; cv.height = SPR_H * SPR_SCALE;
+    const g = cv.getContext('2d');
+    g.scale(SPR_SCALE, SPR_SCALE); g.translate(SPR_OX, SPR_OY);
+    paintBody(g, c, 0, vest, false, false);
+    sprCache.set(key, cv);
+  }
+  return cv;
+}
+
 function chicken(ctx, c, t, env) {
   const persp = 0.86 + (c.y / H) * 0.32; // nearer to the player = bigger
   const k = (c.r / 22) * persp;
@@ -198,60 +277,17 @@ function chicken(ctx, c, t, env) {
     ctx.rotate(side * spread);
     ctx.fillStyle = '#9a7b52';
     ctx.beginPath(); ctx.ellipse(side * 6 + 1.5, 2.5, c.sh ? 16 : 11, 6, 0, 0, 7); ctx.fill();
-    ctx.fillStyle = radial(ctx, side * -2, -4, 1, 16, eventWingStops() || [[0, '#fff6e5'], [1, '#d2b48c']]);
+    ctx.fillStyle = gr('wing' + side + theme.event, () => radial(ctx, side * -2, -4, 1, 16, eventWingStops() || [[0, '#fff6e5'], [1, '#d2b48c']]));
     ctx.beginPath(); ctx.ellipse(side * 6, 0, c.sh ? 16 : 11, 6, 0, 0, 7); ctx.fill();
     ctx.restore();
   }
 
-  // body extrusion: stacked darker copies give thickness
-  for (let i = 5; i >= 1; i--) {
-    ctx.fillStyle = c.chick ? `rgb(${170 - i * 6},${130 - i * 6},${20})` : `rgb(${150 - i * 6},${120 - i * 6},${84 - i * 5})`;
-    ctx.beginPath(); ctx.ellipse(i * 0.9, 2 + i * 1.1, 18, 20, 0, 0, 7); ctx.fill();
-  }
   const body = () => { ctx.beginPath(); ctx.ellipse(0, 2, 18, 20, 0, 0, 7); };
-  ctx.fillStyle = c.chick
-    ? radial(ctx, -7, -9, 2, 28, [[0, '#fffbd0'], [0.5, '#ffe36b'], [1, '#d9a21b']], 0, 2)
-    : radial(ctx, -7, -9, 2, 28, [[0, '#ffffff'], [0.5, '#f3e6d0'], [1, '#bd9a6a']], 0, 2);
-  body(); ctx.fill();
-  if (skin) bossBody(ctx, c, t);
-
-  // vest (clipped to the body so it wraps the belly)
-  if (vest) {
-    ctx.save(); body(); ctx.clip();
-    const vg = ctx.createLinearGradient(-18, 0, 18, 0);
-    vg.addColorStop(0, vest[1]); vg.addColorStop(0.35, vest[0]); vg.addColorStop(0.6, vest[0]); vg.addColorStop(1, vest[1]);
-    ctx.fillStyle = vg;
-    ctx.beginPath(); ctx.moveTo(-19, -1); ctx.lineTo(-5, 0); ctx.lineTo(0, 10); ctx.lineTo(5, 0); ctx.lineTo(19, -1); ctx.lineTo(19, 26); ctx.lineTo(-19, 26); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(-5, 0); ctx.lineTo(0, 10); ctx.lineTo(5, 0); ctx.moveTo(0, 10); ctx.lineTo(0, 26); ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,.35)';
-    ctx.beginPath(); ctx.moveTo(-19, -1); ctx.lineTo(-5, 0); ctx.stroke();
-    if (c.tier <= 2) for (const by of [14, 20]) {
-      ctx.fillStyle = '#ffe9a8'; ctx.beginPath(); ctx.arc(-0.01, by, 1.9, 0, 7); ctx.fill();
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-0.6, by - 0.6, 0.6, 0, 7); ctx.fill();
-    }
-    vestDetail(ctx, c, vest);
-    if (settings.patterns) vestPattern(ctx, c.tier);
-    ctx.restore();
-  }
-
-  // ambient occlusion on belly + specular + rim
-  ctx.save(); body(); ctx.clip();
-  ctx.fillStyle = radial(ctx, 9, 16, 2, 26, [[0, 'rgba(10,10,40,.35)'], [1, 'rgba(10,10,40,0)']]);
-  ctx.fillRect(-20, -20, 40, 44);
-  ctx.restore();
-  ctx.fillStyle = 'rgba(255,255,255,.55)';
-  ctx.beginPath(); ctx.ellipse(-8, -10, 4.5, 7, -0.5, 0, 7); ctx.fill();
-  ctx.strokeStyle = 'rgba(130,160,255,.5)'; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.ellipse(0, 2, 18, 20, 0, 0.1, 1.3); ctx.stroke();
+  // The static part of a regular chicken (body, vest, comb, beak) is painted once per look and reused as an image.
+  const spr = !c.boss && !c.mini && !c.dec && !c.mother && !skin && !panic && !c.sh && quality.level >= 2 ? chickenSprite(c, vest) : null;
+  if (spr) ctx.drawImage(spr, -SPR_OX, -SPR_OY, SPR_W, SPR_H); else paintBody(ctx, c, t, vest, panic, skin);
   if (c.fl > 0 && !settings.reduceFlash) { ctx.fillStyle = 'rgba(255,255,255,.85)'; body(); ctx.fill(); }
 
-  // comb (bevelled)
-  for (const [x, y, r] of [[-6, -19, 5], [0, -23, 6], [6, -19, 5]]) {
-    ctx.fillStyle = '#7f1313'; ctx.beginPath(); ctx.arc(x + 1, y + 1.5, r, 0, 7); ctx.fill();
-    ctx.fillStyle = radial(ctx, x - 1.5, y - 2, 0.5, r + 1, [[0, '#ff8a80'], [1, '#c62828']]);
-    ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
-  }
   eventHat(ctx, c, t);
   // eyes: follow the player; wide with tiny pupils when panicking; red when angry
   for (const x of [-6.5, 6.5]) {
@@ -275,13 +311,6 @@ function chicken(ctx, c, t, env) {
     ctx.fillStyle = '#f48fb1'; ctx.beginPath(); ctx.arc(-13, -4, 3.2, 0, 7); ctx.arc(13, -4, 3.2, 0, 7); ctx.fill();
     ctx.fillStyle = '#fff176'; ctx.beginPath(); ctx.arc(-13, -4, 1.2, 0, 7); ctx.arc(13, -4, 1.2, 0, 7); ctx.fill();
   }
-  // beak (two facets; open when panicking) + wattle
-  if (panic) { ctx.fillStyle = '#5a1010'; ctx.beginPath(); ctx.ellipse(0, 5.5, 3.4, 3.4, 0, 0, 7); ctx.fill(); }
-  const bo = panic ? 2.2 : 0;
-  ctx.fillStyle = '#ffb74d'; ctx.beginPath(); ctx.moveTo(-5, 1 - (panic ? 1 : 0)); ctx.lineTo(0, 1 - (panic ? 1 : 0)); ctx.lineTo(0, 7 - bo); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#ef6c00'; ctx.beginPath(); ctx.moveTo(0, 1 - (panic ? 1 : 0)); ctx.lineTo(5, 1 - (panic ? 1 : 0)); ctx.lineTo(0, 7 - bo); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = radial(ctx, -0.8, 11, 0.5, 4.5, [[0, '#ff8a80'], [1, '#c62828']]);
-  ctx.beginPath(); ctx.ellipse(0, 12 + bo, 2.6, 4, 0, 0, 7); ctx.fill();
   costumeFront(ctx, c, t);
   if (skin) bossFront(ctx, c, t);
   if (panic) { // sweat drop
@@ -841,7 +870,7 @@ function ship(ctx, p, t) {
   ctx.fillStyle = hg; hullPath(ctx); ctx.fill();
   ctx.save(); hullPath(ctx); ctx.clip(); skin(ctx, p, t); ctx.restore();
   if (p.skin === 'neon') { // glowing tube outline in the pilot's colour
-    ctx.save(); ctx.shadowColor = p.color; ctx.shadowBlur = quality.level >= 2 ? 12 + Math.sin(t * 5) * 3 : 0; ctx.strokeStyle = p.color; ctx.lineWidth = 2;
+    ctx.save(); ctx.shadowColor = p.color; ctx.shadowBlur = quality.level >= 3 ? 12 + Math.sin(t * 5) * 3 : 0; ctx.strokeStyle = p.color; ctx.lineWidth = 2;
     hullPath(ctx); ctx.stroke();
     for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s * 5, -2); ctx.lineTo(s * 26, 18); ctx.lineTo(s * 20, 22); ctx.lineTo(s * 6, 14); ctx.stroke(); }
     ctx.restore();
@@ -977,7 +1006,7 @@ function hud(ctx, s: State, me, t) {
     ctx.save();
     for (let w = 0; w < 5; w++) {
       const on = w < p.power;
-      if (on && quality.level >= 2) { ctx.shadowColor = '#ffb300'; ctx.shadowBlur = 7; }
+      if (on && quality.level >= 3) { ctx.shadowColor = '#ffb300'; ctx.shadowBlur = 7; }
       const g = ctx.createLinearGradient(0, y + 21, 0, y + 29);
       g.addColorStop(0, on ? '#fff3b0' : 'rgba(255,255,255,.18)'); g.addColorStop(1, on ? '#ff9800' : 'rgba(255,255,255,.08)');
       ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(116 + w * 8, y + 21, 6, 8, 2); ctx.fill();
@@ -1027,7 +1056,7 @@ function hud(ctx, s: State, me, t) {
     ctx.fillStyle = 'rgba(8,12,40,.7)'; ctx.beginPath(); ctx.arc(gx, gy, 24, 0, 7); ctx.fill();
     ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.beginPath(); ctx.arc(gx, gy, 20, 0, 7); ctx.stroke();
     ctx.strokeStyle = ready ? role.color : 'rgba(255,255,255,.7)';
-    if (ready && quality.level >= 2 && !settings.reduceFlash) { ctx.shadowColor = role.color; ctx.shadowBlur = 12; }
+    if (ready && quality.level >= 3 && !settings.reduceFlash) { ctx.shadowColor = role.color; ctx.shadowBlur = 12; }
     ctx.beginPath(); ctx.arc(gx, gy, 20, -Math.PI / 2, -Math.PI / 2 + (clamp(keyMe.charge, 0, 100) / 100) * Math.PI * 2); ctx.stroke();
     ctx.shadowBlur = 0; ctx.fillStyle = ready ? '#fff' : 'rgba(255,255,255,.6)'; ctx.font = 'bold 8px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(ready ? role.ability.toUpperCase() : Math.floor(keyMe.charge) + '%', gx, gy);
@@ -1197,7 +1226,7 @@ export function draw(ctx, s: State, me, t, { paused, silent, quiet, replay }: { 
   const mine = s.players[me];
   const wenv = {
     px: mine && mine.alive ? clamp((mine.x - W / 2) / (W / 2), -1, 1) : 0,
-    q: quality.level, beat: settings.reduceFlash ? 0 : sfx.getBeat(), flare: settings.reduceFlash ? 0 : getFlare(), bullets: s.bullets, spark: (x, y) => spark(x, y),
+    q: quality.level >= 3 ? 2 : quality.level >= 1 ? 1 : 0, beat: settings.reduceFlash || quality.level < 3 ? 0 : sfx.getBeat(), flare: settings.reduceFlash || quality.level < 3 ? 0 : getFlare(), bullets: s.bullets, spark: (x, y) => spark(x, y),
   };
 
   const sh = settings.reduceFlash ? 0 : shakeAmount();
@@ -1237,10 +1266,10 @@ export function draw(ctx, s: State, me, t, { paused, silent, quiet, replay }: { 
   drawParts(ctx);
   if (list.length > 1) for (const p of list) if (p.alive) nameTag(ctx, p);
   eventFront(ctx, t, quality.level);
-  if (quality.level >= 2) drawForeground(ctx, t, s.wave, wenv);
+  if (quality.level >= 3) drawForeground(ctx, t, s.wave, wenv);
   vignette(ctx);
   ctx.restore();
-  if (quality.level >= 2 && !(pack.opts.pixel > 1) && !settings.reduceFlash) lens(ctx);
+  if (quality.level >= 3 && !(pack.opts.pixel > 1) && !settings.reduceFlash) lens(ctx);
 
   if (pack.colors.overlay && pack.colors.overlayAlpha > 0) {
     const n = parseInt(pack.colors.overlay.slice(1), 16);
@@ -1252,7 +1281,7 @@ export function draw(ctx, s: State, me, t, { paused, silent, quiet, replay }: { 
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const glowText = (txt, y, size, col) => {
     ctx.font = `bold ${size}px system-ui, sans-serif`;
-    ctx.shadowColor = col; ctx.shadowBlur = quality.level >= 2 ? 24 : 0; ctx.fillStyle = col; ctx.fillText(txt, W / 2, y);
+    ctx.shadowColor = col; ctx.shadowBlur = quality.level >= 3 ? 24 : 0; ctx.fillStyle = col; ctx.fillText(txt, W / 2, y);
     ctx.shadowBlur = 0; ctx.fillStyle = '#fff'; ctx.globalAlpha *= 0.85; ctx.fillText(txt, W / 2, y); ctx.globalAlpha /= 0.85;
   };
   if (s.bt > 0 && !s.over && !silent) {

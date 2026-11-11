@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { settings, setSetting } from './settings';
 import { IS_TOUCH, toggleFullscreen } from './util';
+import { setQuality, startQuality } from './perf';
 
 function Row({ title, hint, children }: Record<string, any>) {
   return (
@@ -28,6 +29,13 @@ export default function Settings({ onBack }: Record<string, any>) {
         <h2>Settings</h2>
         <span />
       </div>
+
+      <h3>Performance</h3>
+      <Row title="Graphics" hint="Lag on an older PC or phone? Pick Low: flat chickens, no glow, blur or lens effects. Auto lowers it by itself when the game runs slow.">
+        <select value={settings.graphics} onChange={(e) => { set('graphics', e.target.value); setQuality(startQuality()); }} aria-label="Graphics quality">
+          <option value="auto">Auto</option><option value="low">Low (fastest)</option><option value="medium">Medium</option><option value="high">High</option>
+        </select>
+      </Row>
 
       <h3>Fun</h3>
       <Row title="Funny chickens" hint="Chickens dress up as pirates, ninjas, wizards, zombies, robots and more. Turn off for plain chickens."><Toggle k="costumes" /></Row>

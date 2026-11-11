@@ -3,12 +3,14 @@
 //   - the app shell and static files are cached as you use them (stale-while-revalidate)
 //   - page loads go to the network first and fall back to the cached shell when offline
 //   - the API and WebSocket are never intercepted
-const VERSION = 'cb-v2';
+const VERSION = 'cb-v3';
 const SHELL = ['/', '/manifest.webmanifest', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
+
+self.addEventListener('message', (e) => { if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting(); }); // the in-game Reload button
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(

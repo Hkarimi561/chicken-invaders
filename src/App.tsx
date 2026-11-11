@@ -13,6 +13,7 @@ import AuthScreen from './AuthScreen';
 import GiftCard from './GiftCard';
 import Admin from './Admin';
 import { IS_TOUCH, enterFullscreen, toggleFullscreen, lockLandscape } from './util';
+import { reloadApp, isStandalone } from './pwa';
 import { settings } from './settings';
 import { theme, initTheme, setEventMode } from './theme';
 import { loadActivePack } from './packs';
@@ -406,6 +407,7 @@ export default function App() {
               <button className="ghost" disabled={!!user.offline} onClick={() => setScreen('gift')}><span className="mi">🎁</span>Gift card</button>
               {user.admin && <button className="ghost" onClick={() => setScreen('admin')}><span className="mi">🛠</span>Admin</button>}
               <button className="ghost" onClick={toggleFullscreen}><span className="mi">⛶</span>Full screen</button>
+              <button className={'ghost' + (isStandalone() ? ' accent' : '')} onClick={() => reloadApp(true)} title="Fetch the latest version and restart the game"><span className="mi">↻</span>Reload app</button>
             </div>
             <p className="sub tiny">Keyboard: WASD / arrows + Space · Ability: E / Shift / right-click · Mouse: move to steer, hold left button to fire · F fullscreen · M mute · P pause · Esc leave · Touch: drag on the left half of the screen to steer</p>
             <p className="sub tiny">Co-op: fly over a downed teammate for 1.5s to revive them (medics are twice as fast).</p>
