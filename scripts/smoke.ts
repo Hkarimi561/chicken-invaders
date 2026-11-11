@@ -263,13 +263,13 @@ const assert = (c, m) => { if (!c) throw new Error('FAIL: ' + m); };
   assert(screenTilt(10, 20, 270).x === -10 && screenTilt(10, 20, 270).y === 20 && screenTilt(10, 20, -90).x === -10, 'landscape 270 / -90');
   assert(screenTilt(10, 20, 180).x === -20 && screenTilt(10, 20, 180).y === -10, 'upside down');
   const mid = tiltToTarget({ x: 0, y: 0 }, { x: 0, y: 0 });
-  assert(near(mid.tx, W / 2) && near(mid.ty, (H * 0.45 + H - 30) / 2), 'neutral pose is the centre of the play area');
+  assert(near(mid.tx, W / 2) && near(mid.ty, (30 + H - 30) / 2), 'neutral pose is the centre of the play area');
   assert(tiltToTarget({ x: 1, y: 1 }, { x: 0, y: 0 }).tx === mid.tx, 'a small wobble inside the dead zone is ignored');
   assert(near(tiltToTarget({ x: 24 + 1.5, y: 0 }, { x: 0, y: 0 }).tx, W - 24) && near(tiltToTarget({ x: -90, y: 0 }, { x: 0, y: 0 }).tx, 24), 'full tilt reaches the edges and is clamped');
   const calib = tiltToTarget({ x: 30, y: 40 }, { x: 30, y: 40 });
   assert(near(calib.tx, mid.tx) && near(calib.ty, mid.ty), 'tilt is measured from the calibrated pose, not from flat');
   const up = tiltToTarget({ x: 0, y: -100 }, { x: 0, y: 0 }), down = tiltToTarget({ x: 0, y: 100 }, { x: 0, y: 0 });
-  assert(near(up.ty, H * 0.45) && near(down.ty, H - 30), 'vertical tilt spans exactly the ship\'s allowed height');
+  assert(near(up.ty, 30) && near(down.ty, H - 30), 'vertical tilt spans exactly the ship\'s allowed height');
 }
 console.log('sim mechanics ok');
 process.exit(0);

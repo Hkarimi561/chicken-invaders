@@ -24,7 +24,7 @@ export function tiltToTarget(tilt, neutral, opts = GYRO) {
   const dz = (v) => (Math.abs(v) < opts.dead ? 0 : v - Math.sign(v) * opts.dead);
   const nx = clamp(dz(tilt.x - neutral.x) / opts.rangeX, -1, 1);
   const ny = clamp(dz(tilt.y - neutral.y) / opts.rangeY, -1, 1);
-  const top = H * 0.45, bottom = H - 30; // the ship's vertical limits in the sim
+  const top = 30, bottom = H - 30; // the ship's vertical limits in the sim
   return {
     tx: W / 2 + nx * (W / 2 - 24),
     ty: (top + bottom) / 2 + ny * ((bottom - top) / 2),

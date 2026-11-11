@@ -77,7 +77,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   nova.players.a.input = { ...emptyInput(), ab: 1 };
   step(nova, 1 / 60);
   assert(nova.chickens.length === 0 && nova.eggs.length === 0 && nova.players.a.st.novas === 1 && nova.fxPulse.some((p) => p.kind === 'nova'), 'Nova damages every chicken and wipes the eggs');
-  assert(nova.players.a.charge < 100 && nova.players.a.charge > 0, 'charge resets, then kills recharge it');
+  assert(nova.players.a.charge === 0, 'charge resets and nothing but a Nova item recharges Nova');
+  { // Nova items: only bosses drop them, they weave, and one fills half the bar
+    const ni = createState(5); addPlayer(ni, 'a', 'A'); ni.delay = 99; ni.players.a.x = 400; ni.players.a.y = 500;
+    for (let i = 0; i < 600; i++) step(ni, 1 / 60);
+    assert(ni.players.a.charge === 0, 'Nova no longer charges by itself over time');
+    ni.gifts.push({ id: 700, x: 400, y: 400, k: 'nova', bx: 400 }); step(ni, 1 / 60);
+    ni.players.a.x = ni.gifts[0].x; ni.players.a.y = ni.gifts[0].y; step(ni, 1 / 60);
+    assert(ni.players.a.charge === 50 && ni.gifts.length === 0, 'a Nova item fills 50% of the bar');
+    ni.players.a.charge = 0; ni.gifts = [{ id: 701, x: ni.players.a.x, y: ni.players.a.y, k: 'nova', bx: ni.players.a.x - 140 }];
+    const xs = []; for (let i = 0; i < 30; i++) { step(ni, 1 / 60); if (ni.gifts[0]) xs.push(ni.gifts[0].x); }
+    assert(Math.max(...xs) - Math.min(...xs) > 20, 'a Nova item weaves sideways');
+    ni.players.a.y = 40; step(ni, 1 / 60); ni.players.a.input = { ...emptyInput(), up: 1 };
+    for (let i = 0; i < 120; i++) step(ni, 1 / 60);
+    assert(ni.players.a.y < 100, 'the ship can fly to the top of the screen');
+  }
   nova.players.a.charge = 100; step(nova, 1 / 60);
   assert(nova.players.a.st.novas === 1, 'holding the button does not re-trigger');
   nova.players.a.input = { ...emptyInput(), ab: 0 }; step(nova, 1 / 60);
@@ -207,6 +221,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const eb = ev.chickens.find((c) => c.boss);
   assert(eb.ev === 'halloween', 'boss carries the event costume flag');
   eb.hp = 1; ev.bullets.push({ x: eb.x, y: eb.y, vx: 0, vy: 0, o: 'a', w: 'b', d: 1 }); step(ev, 1 / 60);
+  assert(ev.gifts.filter((g) => g.k === 'nova').length === 1, 'a boss drops one Nova item');
   assert(ev.gifts.filter((g) => g.k === 'key').length === 5, 'an event boss drops 2 bonus keys');
 }
 

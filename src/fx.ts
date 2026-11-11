@@ -60,8 +60,8 @@ function text(x, y, txt, color, size = 16, life = 0.95) {
   parts.push({ type: 'text', x, y, vx: 0, vy: -55, life, max: life, txt, c: color, size, rot: 0 });
 }
 
-const GIFT_COL = { power: ['#ffd54f', '#fff'], life: ['#ff5277', '#fff'], food: ['#ff9800', '#fff'], wpn: ['#80d8ff', '#fff'], ice: ['#b3e5fc', '#ffffff'], key: ['#ffd54f', '#fff8c4'] };
-const GIFT_TXT = { power: '+POWER', life: '+1 LIFE', food: '+100', key: '+1 KEY', ice: 'COOLED!' };
+const GIFT_COL = { power: ['#ffd54f', '#fff'], life: ['#ff5277', '#fff'], food: ['#ff9800', '#fff'], wpn: ['#80d8ff', '#fff'], ice: ['#b3e5fc', '#ffffff'], key: ['#ffd54f', '#fff8c4'], nova: ['#ffb347', '#ffffff'] };
+const GIFT_TXT = { power: '+POWER', life: '+1 LIFE', food: '+100', key: '+1 KEY', ice: 'COOLED!', nova: '+NOVA CHARGE' };
 const WPN_TXT = { blaster: 'BLASTER', pulse: 'PULSE', laser: 'LASER', missile: 'MISSILE' };
 export const COMBO_COL = (n) => (n >= 40 ? '#18ffff' : n >= 20 ? '#ff4df0' : n >= 10 ? '#ff9100' : n >= 5 ? '#ffd740' : '#ffffff');
 

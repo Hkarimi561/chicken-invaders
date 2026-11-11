@@ -22,7 +22,7 @@ export interface Player {
 export interface Chicken { id: number; x: number; y: number; hp: number; max?: number; tier?: number; boss?: boolean; r: number; [k: string]: any }
 export interface Bullet { x: number; y: number; vx: number; vy: number; o: string; w: string; d: number; [k: string]: any }
 export interface Egg { x: number; y: number; vx?: number; vy: number; [k: string]: any }
-export interface Gift { id: number; x: number; y: number; k: string; w?: string; dead?: boolean }
+export interface Gift { id: number; x: number; y: number; k: string; w?: string; dead?: boolean; bx?: number }
 
 export interface State {
   seed: number; t: number; tick: number; wave: number; eff: number; nid: number; over: boolean; delay: number;

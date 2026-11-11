@@ -444,7 +444,7 @@ function egg(ctx, e, t) {
 function gift(ctx, g, t) {
   const pulse = 1 + Math.sin(t * 6 + g.id) * 0.08;
   ctx.save(); ctx.translate(g.x, g.y); ctx.scale(pulse, pulse);
-  const col = g.k === 'power' ? '255,193,7' : g.k === 'life' ? '255,82,120' : g.k === 'wpn' ? '110,220,255' : g.k === 'key' ? '255,215,0' : g.k === 'ice' ? '130,220,255' : '255,152,0';
+  const col = g.k === 'power' ? '255,193,7' : g.k === 'life' ? '255,82,120' : g.k === 'wpn' ? '110,220,255' : g.k === 'key' ? '255,215,0' : g.k === 'ice' ? '130,220,255' : g.k === 'nova' ? '255,170,60' : '255,152,0';
   ctx.globalCompositeOperation = 'lighter';
   ctx.fillStyle = radial(ctx, 0, 0, 2, 26, [[0, `rgba(${col},.6)`], [1, `rgba(${col},0)`]]);
   ctx.beginPath(); ctx.arc(0, 0, 26, 0, 7); ctx.fill();
@@ -494,6 +494,15 @@ function gift(ctx, g, t) {
     else if (g.w === 'laser') { ctx.beginPath(); ctx.moveTo(0, 6); ctx.lineTo(0, -7); ctx.stroke(); ctx.beginPath(); ctx.arc(0, -7, 1.6, 0, 7); ctx.fill(); }
     else if (g.w === 'missile') { ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(3.5, 0); ctx.lineTo(3.5, 6); ctx.lineTo(-3.5, 6); ctx.lineTo(-3.5, 0); ctx.closePath(); ctx.fill(); }
     else { ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(-5, 5); ctx.moveTo(0, -7); ctx.lineTo(5, 5); ctx.stroke(); }
+  } else if (g.k === 'nova') { // spinning starburst orb: charges the Nova ability
+    const blink = 0.8 + 0.2 * Math.sin(t * 14);
+    ctx.save(); ctx.rotate(t * 2.2); ctx.scale(1.25 * blink, 1.25 * blink);
+    ctx.fillStyle = '#ff6d00'; ctx.beginPath();
+    for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2, rr = i % 2 ? 8 : 17; ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); }
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = radial(ctx, 0, 0, 1, 10, [[0, '#ffffff'], [0.5, '#ffe082'], [1, '#ff9100']]); ctx.beginPath(); ctx.arc(0, 0, 9, 0, 7); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.restore();
   } else { // drumstick
     ctx.rotate(-0.6);
     ctx.fillStyle = '#f5e6c8'; ctx.fillRect(-1.5, 2, 3, 12);

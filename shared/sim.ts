@@ -3,7 +3,7 @@
 export const W = 800;
 export const H = 600;
 /** Bump whenever a change would make an old recording play out differently. */
-export const SIM_VERSION = 7;
+export const SIM_VERSION = 8;
 
 import { PALETTE, SKINS, SHOP_GUN_IDS, TRAIL_INFO } from './catalog';
 import type { State, Player, Input, Loadout } from './types';
@@ -24,10 +24,12 @@ export const MUTATORS = {
 };
 export const MUT_IDS = Object.keys(MUTATORS);
 
-// Co-op roles: each has a passive perk and an ability that charges from kills (and slowly over time).
+// Co-op roles: each has a passive perk and an ability. Nova / Super Nova only charge from the glowing Nova item that
+// bosses drop (hard to catch); Aegis and Mend still charge from kills and slowly over time.
+const NOVA_ITEM_CHARGE = 50; // percent of the ability bar one Nova item fills
 export const ROLES = {
   ace: { name: 'Ace', icon: 'A', color: '#ffb300', ability: 'Nova', desc: 'Balanced. Nova: damages every chicken and wipes all eggs.' },
-  striker: { name: 'Striker', icon: 'S', color: '#ff5252', ability: 'Super Nova', desc: 'Fires 12% faster and charges 25% quicker. A harder-hitting Nova.' },
+  striker: { name: 'Striker', icon: 'S', color: '#ff5252', ability: 'Super Nova', desc: 'Fires 12% faster; Nova items charge it 25% more. A harder-hitting Nova.' },
   tank: { name: 'Tank', icon: 'T', color: '#42a5f5', ability: 'Aegis', desc: '+1 life, a little slower. Aegis: a shield dome for the whole team.' },
   medic: { name: 'Medic', icon: 'M', color: '#69f0ae', ability: 'Mend', desc: 'Revives allies twice as fast. Mend: heals and revives everyone nearby.' },
 };
@@ -180,9 +182,10 @@ function killChicken(s: State, c, owner: Player) {
   const pts = Math.round((c.boss ? 500 : 10 * (c.max || 1)) * s.smul);
   if (owner) {
     owner.score += pts; owner.kills++;
-    owner.charge = Math.min(100, (owner.charge || 0) + (c.boss ? 40 : 3 + 2 * (c.max || 1)));
+    if (owner.role === 'tank' || owner.role === 'medic') owner.charge = Math.min(100, (owner.charge || 0) + (c.boss ? 40 : 3 + 2 * (c.max || 1)));
     if (c.boss) owner.st.bosses++;
   }
+  if (c.boss) s.gifts.push({ id: s.nid++, x: c.x, y: c.y, k: 'nova', bx: c.x }); // the only source of Nova charge
   const noDrops = has(s, 'drought') || c.mini || c.dec || c.sol;
   const drops = noDrops ? 0 : c.boss ? 4 : rnd(s) < 0.16 ? 1 : 0;
   for (let i = 0; i < drops; i++) {
@@ -341,7 +344,7 @@ function bossAttack(s: State, c) {
     for (let i = 0; i < c.ph; i++) {
       const p = pick();
       const x = clamp((p ? p.x : W / 2) + (i ? (rnd(s) - 0.5) * 200 : 0), 60, W - 60);
-      const y = clamp((p ? p.y : H - 120) + (i ? (rnd(s) - 0.5) * 120 : 0), H * 0.45, H - 40);
+      const y = clamp((p ? p.y : H - 120) + (i ? (rnd(s) - 0.5) * 120 : 0), 70, H - 40);
       zone(s, { k: 'bomb', x, y, sx: c.x, sy: c.y + 40, cx: c.x, cy: c.y + 40, fall: 1.5, r: 78, hp: 2 });
     }
     c.bt = 2.4 * slow; return;
@@ -354,7 +357,7 @@ function bossAttack(s: State, c) {
     const n = 2 + c.ph;
     for (let i = 0; i < n && s.zones.filter((z) => z.k === 'lava').length < 9; i++) {
       const p = pick();
-      zone(s, { k: 'lava', x: clamp((p ? p.x : W / 2) + (rnd(s) - 0.5) * 240, 50, W - 50), y: clamp((p ? p.y : H - 100) + (rnd(s) - 0.5) * 160, H * 0.5, H - 40), sx: c.x, sy: c.y + 40, fall: 0.9, life: 5, r: 42 });
+      zone(s, { k: 'lava', x: clamp((p ? p.x : W / 2) + (rnd(s) - 0.5) * 240, 50, W - 50), y: clamp((p ? p.y : H - 100) + (rnd(s) - 0.5) * 160, 80, H - 40), sx: c.x, sy: c.y + 40, fall: 0.9, life: 5, r: 42 });
     }
     c.bt = 2.3 * slow; return;
   }
@@ -375,7 +378,7 @@ function bossAttack(s: State, c) {
       }
       c.bt = 1.4 * slow; return;
     }
-    if (s.zones.filter((z) => z.k === 'frost').length < 3) { const p = pick(); zone(s, { k: 'frost', x: clamp((p ? p.x : W / 2) + (rnd(s) - 0.5) * 160, 70, W - 70), y: clamp((p ? p.y : H - 100), H * 0.55, H - 50), r: 95, life: 7 }); }
+    if (s.zones.filter((z) => z.k === 'frost').length < 3) { const p = pick(); zone(s, { k: 'frost', x: clamp((p ? p.x : W / 2) + (rnd(s) - 0.5) * 160, 70, W - 70), y: clamp((p ? p.y : H - 100), 80, H - 50), r: 95, life: 7 }); }
   }
   if (c.ph === 1) { // fan
     for (const a of [-0.35, 0, 0.35]) eggAt(s, c.x, c.y + 40, Math.PI / 2 + a, sp);
@@ -424,7 +427,7 @@ export function step(s: State, dt) {
       continue;
     }
     const i = p.input;
-    p.charge = Math.min(100, (p.charge || 0) + dt * 2 * (p.role === 'striker' ? 1.25 : 1));
+    if (p.role === 'tank' || p.role === 'medic') p.charge = Math.min(100, (p.charge || 0) + dt * 2);
     if (i.ab && !p.abHeld && p.charge >= 100) useAbility(s, p);
     p.abHeld = i.ab ? 1 : 0;
     const frozen = p.frz > 0;
@@ -442,7 +445,7 @@ export function step(s: State, dt) {
       p.x += (dx / d) * pull * dt; p.y += (dy / d) * pull * 0.5 * dt;
     }
     p.x = clamp(p.x, 24, W - 24);
-    p.y = clamp(p.y, H * 0.45, H - 30);
+    p.y = clamp(p.y, 30, H - 30); // the whole screen is flyable
     if (i.fire && p.cd <= 0 && !p.oh && !frozen) { const n0 = s.bullets.length; fire(s, p); p.shots += s.bullets.length - n0; }
   }
 
@@ -810,22 +813,25 @@ export function step(s: State, dt) {
 
   // gifts
   for (const g of s.gifts) {
-    g.y += 130 * dt;
+    const nv = g.k === 'nova';
+    g.y += (nv ? 210 : 130) * dt;
+    if (nv) g.x = clamp((g.bx ?? g.x) + Math.sin(s.t * 3.2 + g.id) * 120 + Math.sin(s.t * 7.1 + g.id * 2) * 30, 20, W - 20); // weaves side to side: hard to catch
     if (g.y > H + 20) { g.dead = true; continue; }
     for (const p of players) {
       if (!p.alive) continue;
-      const mag = p.mods?.magnet || 0;
+      const mag = nv ? 0 : p.mods?.magnet || 0; // the magnet upgrade cannot pull a Nova item
       let dx = g.x - p.x, dy = g.y - p.y;
       if (mag && dx * dx + dy * dy < (100 + mag * 45) ** 2) { // magnet upgrade pulls drops in
         const d = Math.hypot(dx, dy) || 1;
         g.x -= (dx / d) * 170 * dt; g.y -= (dy / d) * 170 * dt; dx = g.x - p.x; dy = g.y - p.y;
       }
-      const rr = 30 * (1 + 0.25 * mag);
+      const rr = nv ? 24 : 30 * (1 + 0.25 * mag);
       if (dx * dx + dy * dy < rr * rr) {
         g.dead = true;
         if (g.k === 'power') p.power = Math.min(5, p.power + 1);
         else if (g.k === 'life') p.lives = Math.min(5, p.lives + 1);
         else if (g.k === 'key') p.keys = (p.keys || 0) + 1;
+        else if (g.k === 'nova') p.charge = Math.min(100, (p.charge || 0) + NOVA_ITEM_CHARGE * (p.role === 'striker' ? 1.25 : 1));
         else if (g.k === 'ice') { p.heat = 0; p.oh = false; p.ice = 5; s.zones = s.zones.filter((z) => z.k !== 'lava'); } // reset the gun, stay cool for 5 s, and cool the lava
         else if (g.k === 'wpn') {
           if (p.weapon === g.w) p.power = Math.min(5, p.power + 1);
