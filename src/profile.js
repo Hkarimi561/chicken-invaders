@@ -40,7 +40,8 @@ export async function loadProfile() {
 export const buy = (item) => api('/api/buy', { id: getPid(), item }).then((j) => j.profile);
 export const equip = (slot, value) => api('/api/equip', { id: getPid(), slot, value }).then((j) => j.profile);
 export const claim = () => api('/api/claim', { id: getPid() }).then((j) => ({ profile: j.profile, claimed: j.claimed }));
-export const startRun = () => api('/api/run/start', { id: getPid() }).then((j) => j.runId);
+/** Starts a browser-simulated run: kind is 'solo', 'daily' or 'rush'. Returns { runId, seed, mut, event, daily }. */
+export const startRun = (kind = 'solo', mut = []) => api('/api/run/start', { id: getPid(), kind, mut });
 export const endRun = (runId, run) => api('/api/run/end', { id: getPid(), runId, ...run }).then((j) => j);
 /** Leaderboard rows for a mode and board; the server flags your own row with 'you'. */
 export const leaderboard = (mode, board) => api('/api/leaderboard', { id: getPid(), mode, board });
@@ -52,3 +53,20 @@ export async function useCode(code) {
   setPid(j.id);
   return j.profile;
 }
+
+// ---- daily challenge, progression ----
+export const getDaily = () => api('/api/daily');
+export const claimWeekly = (goal) => api('/api/weekly/claim', { id: getPid(), goal }).then((j) => j.profile);
+export const claimSeason = (tier) => api('/api/season/claim', { id: getPid(), tier }).then((j) => j.profile);
+export const setTitle = (title) => api('/api/title', { id: getPid(), title }).then((j) => j.profile);
+export const achSeen = () => api('/api/ach/seen', { id: getPid() }).then((j) => j.profile);
+
+// ---- rooms ----
+export const listRooms = () => api('/api/rooms').then((j) => j.rooms);
+
+// ---- community pack gallery ----
+export const galleryList = (sort = 'new') => api('/api/packs?sort=' + encodeURIComponent(sort));
+export const galleryGet = (id) => api('/api/packs/' + encodeURIComponent(id));
+export const galleryPublish = (pack, desc) => api('/api/packs/publish', { id: getPid(), pack, desc });
+export const galleryRemove = (packId) => api('/api/packs/remove', { id: getPid(), packId });
+export const galleryReport = (packId) => api('/api/packs/report', { id: getPid(), packId });

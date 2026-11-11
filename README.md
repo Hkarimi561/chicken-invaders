@@ -106,9 +106,38 @@ Pack file format (`format: 1`):
 Image slots: `chicken chick boss mother egg bullet ship gift_power gift_life gift_food gift_wpn gift_key background`.
 Sound slots: `shoot kill hit gift wave music`.
 
+## Game modes and variety
+
+- **Daily challenge**: one fixed seed and mutator set per UTC day, same for everyone, with its own daily board.
+- **Mutators** (solo, rooms, daily): modifiers such as fast chickens or thick vests that change the run and its score.
+- **Bosses**: several boss kinds (swinger, mirror, splitter and more); **Boss rush** chains them with its own board.
+- **Abilities and roles**: each pilot has a skill button (Space+Shift, or the on-screen skill key). Co-op roles
+  (e.g. gunner, medic, tank) give each player a different strength.
+- **Progression**: pilot XP and level, achievements, weekly goals and season stars from seasonal events.
+
+## Rooms, spectating and replays
+
+- *Rooms* lists public rooms; rooms can have a password, a mutator set, and quick play drops you in the best match.
+- Spectators can watch any room. If your connection drops you have 30 seconds to rejoin the same seat automatically.
+- Finished runs can be saved as **replays** (seed + inputs, re-simulated deterministically, so files are tiny).
+  Export/import them as files; replays from an older sim version are refused.
+- Resource packs can be shared in the community **Gallery**; the server re-validates every upload.
+
+## Accessibility and settings
+
+Settings has colour-blind patterns, reduced flashing, auto-fire, adjustable touch controls, separate volume
+sliders (effects / music) and layered, per-event music. The UI is full screen; on touch devices a floating
+joystick appears under your thumb anywhere on the left half of the screen.
+
+## Install as an app (PWA)
+
+In production the game is installable (manifest, icons, service worker) and single player works offline.
+Needs https or localhost (the built-in https listener on port 3443 works for this too).
+
 ## Layout
 
 - `shared/` game simulation (runs in the browser and on the server) and the shop catalog
 - `server/` Express + WebSocket server, profile API
 - `src/` React UI, canvas renderer, effects, procedural audio
-- `scripts/smoke.js` headless tests
+- `scripts/smoke.js`, `scripts/smoke2.js` headless tests (`npm test`)
+- `public/` PWA manifest, service worker and icons (`scripts/make-icons.mjs` regenerates them)

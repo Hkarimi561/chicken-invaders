@@ -1,8 +1,9 @@
-import { W, H } from '../shared/sim.js';
+import { W, H, ROLES, BOSS_NAMES } from '../shared/sim.js';
 
 // All art is original and drawn with canvas paths/gradients (no sprites, no emoji).
 
-import { clamp, shade, radial, shadowEllipse, quality } from './util.js';
+import { clamp, shade, radial, shadowEllipse, quality, IS_TOUCH } from './util.js';
+import { settings } from './settings.js';
 import { drawWorld, drawForeground } from './world.js';
 import * as sfx from './audio.js';
 import { pack, drawSprite, getImg, chickenSlot } from './packs.js';
@@ -78,6 +79,46 @@ function vestDetail(ctx, c, vest) {
   cracks(ctx, c);
 }
 
+const KIND_RGB = { mother: '255,200,80', sweeper: '90,220,255', splitter: '190,110,255', mirror: '200,225,255' };
+
+// Colour-blind help: each vest tier gets its own pattern on top of its colour (clipped to the vest by the caller).
+function vestPattern(ctx, tier) {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 1.2;
+  if (tier === 1) { for (let y = 10; y < 27; y += 5) { ctx.beginPath(); ctx.moveTo(-19, y); ctx.lineTo(19, y); ctx.stroke(); } }          // stripes
+  else if (tier === 2) { for (let y = 11; y < 27; y += 6) for (let x = -15; x <= 15; x += 6) { ctx.beginPath(); ctx.arc(x + (y % 12 ? 3 : 0), y, 1.2, 0, 7); ctx.fill(); } } // dots
+  else if (tier === 3) { for (let y = 12; y < 27; y += 7) { ctx.beginPath(); for (let x = -19; x <= 19; x += 5) ctx.lineTo(x, y + ((x / 5) & 1 ? 2.5 : 0)); ctx.stroke(); } } // zigzag
+  else if (tier === 4) { for (let i = -30; i < 40; i += 7) { ctx.beginPath(); ctx.moveTo(i, 8); ctx.lineTo(i + 18, 28); ctx.moveTo(i + 18, 8); ctx.lineTo(i, 28); ctx.stroke(); } } // cross-hatch
+  ctx.restore();
+}
+
+// Boss-specific decorations, drawn in the chicken's local (scaled) coordinates.
+function bossExtras(ctx, c, t) {
+  if (c.kind === 'sweeper') { // laser lens on the forehead, hot while the beam is firing
+    ctx.fillStyle = '#1b1b2f'; ctx.beginPath(); ctx.arc(0, -13, 6.5, 0, 7); ctx.fill();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = c.beam ? 1 : 0.4 + 0.3 * Math.sin(t * 6);
+    ctx.fillStyle = radial(ctx, 0, -13, 0, 13, [[0, 'rgba(255,90,90,' + g + ')'], [1, 'rgba(255,40,40,0)']]);
+    ctx.beginPath(); ctx.arc(0, -13, 13, 0, 7); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#ff5252'; ctx.beginPath(); ctx.arc(0, -13, 2.6, 0, 7); ctx.fill();
+  } else if (c.kind === 'mirror') { // chrome sheen, and a flashing ring just before it lunges
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = radial(ctx, -6, -8, 2, 28, [[0, 'rgba(230,245,255,.5)'], [1, 'rgba(150,200,255,0)']]);
+    ctx.beginPath(); ctx.ellipse(0, 2, 18, 20, 0, 0, 7); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    if (c.warn && (settings.reduceFlash || Math.floor(t * 10) % 2)) { ctx.strokeStyle = 'rgba(255,80,80,.9)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 48, 0, 7); ctx.stroke(); }
+    if (c.dash != null) { ctx.strokeStyle = 'rgba(200,225,255,.5)'; ctx.lineWidth = 2; for (const x of [-16, 0, 16]) { ctx.beginPath(); ctx.moveTo(x, -26); ctx.lineTo(x, -60); ctx.stroke(); } }
+  } else if (c.kind === 'splitter' && c.sh) { // purple shield while its pieces are alive
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = radial(ctx, 0, 0, 20, 50, [[0, 'rgba(190,110,255,.05)'], [1, 'rgba(190,110,255,.5)']]);
+    ctx.beginPath(); ctx.arc(0, 0, 50, 0, 7); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = 'rgba(220,170,255,.85)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 50, 0, 7); ctx.stroke();
+  }
+  if (c.mini) { ctx.strokeStyle = 'rgba(210,150,255,.85)'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(0, 0, 30, 0, 7); ctx.stroke(); }
+}
+
 function chicken(ctx, c, t, env) {
   const persp = 0.86 + (c.y / H) * 0.32; // nearer to the player = bigger
   const k = (c.r / 22) * persp;
@@ -109,9 +150,9 @@ function chicken(ctx, c, t, env) {
   ctx.scale(k, k);
 
   shadowEllipse(ctx, 7, 16, 20, 17, 0.3);
-  if (c.boss) {
+  if (c.boss || c.mini) {
     ctx.globalCompositeOperation = 'lighter';
-    const rgb = c.mother ? '255,200,80' : '255,60,60';
+    const rgb = KIND_RGB[c.kind] || (c.mini ? '190,110,255' : '255,60,60');
     ctx.fillStyle = radial(ctx, 0, 0, 10, 40, [[0, `rgba(${rgb},.45)`], [1, `rgba(${rgb},0)`]]);
     ctx.beginPath(); ctx.arc(0, 0, 40, 0, 7); ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
@@ -172,6 +213,7 @@ function chicken(ctx, c, t, env) {
       ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-0.6, by - 0.6, 0.6, 0, 7); ctx.fill();
     }
     vestDetail(ctx, c, vest);
+    if (settings.patterns) vestPattern(ctx, c.tier);
     ctx.restore();
   }
 
@@ -184,7 +226,7 @@ function chicken(ctx, c, t, env) {
   ctx.beginPath(); ctx.ellipse(-8, -10, 4.5, 7, -0.5, 0, 7); ctx.fill();
   ctx.strokeStyle = 'rgba(130,160,255,.5)'; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.ellipse(0, 2, 18, 20, 0, 0.1, 1.3); ctx.stroke();
-  if (c.fl > 0) { ctx.fillStyle = 'rgba(255,255,255,.85)'; body(); ctx.fill(); }
+  if (c.fl > 0 && !settings.reduceFlash) { ctx.fillStyle = 'rgba(255,255,255,.85)'; body(); ctx.fill(); }
 
   // comb (bevelled)
   for (const [x, y, r] of [[-6, -19, 5], [0, -23, 6], [6, -19, 5]]) {
@@ -234,6 +276,7 @@ function chicken(ctx, c, t, env) {
     ctx.beginPath(); ctx.arc(0, 0, 50, 0, 7); ctx.stroke();
     ctx.globalCompositeOperation = 'source-over';
   }
+  if (c.boss || c.mini) bossExtras(ctx, c, t);
   ctx.restore();
 
   // remaining-hits pips (only once damaged)
@@ -268,6 +311,7 @@ function chickenLite(ctx, c, t) {
     ctx.fillStyle = vest[1]; ctx.fillRect(-19, 8, 38, 3);
     if (c.tier >= 2) { ctx.fillStyle = 'rgba(255,255,255,.7)'; ctx.fillRect(-19, 16, 38, 2.5); }
     if (c.tier >= 4) { ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(-19, 22, 38, 2.5); }
+    if (settings.patterns) vestPattern(ctx, c.tier);
     ctx.restore();
   }
   ctx.fillStyle = '#d32f2f';
@@ -794,7 +838,9 @@ function hud(ctx, s, me, t) {
   list.forEach((p, i) => {
     const y = 8 + i * 40;
     panel(ctx, 8, y, 210, 34);
-    ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(22, y + 17, 6, 0, 7); ctx.fill();
+    ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(22, y + 17, 8, 0, 7); ctx.fill();
+    ctx.fillStyle = '#10163a'; ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText((ROLES[p.role] || ROLES.ace).icon, 22, y + 17.5); ctx.textAlign = 'left';
     ctx.font = 'bold 12px system-ui, sans-serif'; ctx.fillStyle = '#e8eaf6';
     const label = p.id === me ? p.name + ' (you)' : p.name;
     ctx.fillText(label, 34, y + 11);
@@ -860,6 +906,23 @@ function hud(ctx, s, me, t) {
     ctx.fillText('x' + (keyMe.keys || 0), W - 144, 22);
   }
 
+  if (keyMe && keyMe.alive && !IS_TOUCH) { // role ability charge (touch devices show it on the button instead)
+    const ready = keyMe.charge >= 100, gx = W - 40, gy = H - 52, role = ROLES[keyMe.role] || ROLES.ace;
+    ctx.save();
+    ctx.fillStyle = 'rgba(8,12,40,.7)'; ctx.beginPath(); ctx.arc(gx, gy, 24, 0, 7); ctx.fill();
+    ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.beginPath(); ctx.arc(gx, gy, 20, 0, 7); ctx.stroke();
+    ctx.strokeStyle = ready ? role.color : 'rgba(255,255,255,.7)';
+    if (ready && quality.level >= 2 && !settings.reduceFlash) { ctx.shadowColor = role.color; ctx.shadowBlur = 12; }
+    ctx.beginPath(); ctx.arc(gx, gy, 20, -Math.PI / 2, -Math.PI / 2 + (clamp(keyMe.charge, 0, 100) / 100) * Math.PI * 2); ctx.stroke();
+    ctx.shadowBlur = 0; ctx.fillStyle = ready ? '#fff' : 'rgba(255,255,255,.6)'; ctx.font = 'bold 8px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(ready ? role.ability.toUpperCase() : Math.floor(keyMe.charge) + '%', gx, gy);
+    ctx.restore();
+  }
+  if (s.mut && s.mut.length) { // active run rules
+    ctx.textAlign = 'center'; ctx.font = 'bold 10px system-ui, sans-serif'; ctx.fillStyle = 'rgba(255,214,120,.85)';
+    ctx.fillText('RULES: ' + s.mut.map((m) => (MUT_LABEL[m] || m)).join(' · ').toUpperCase(), W / 2, H - 5);
+  }
+
   // combo counter
   const cb = getCombo(t);
   if (cb && cb.n >= 3) {
@@ -882,7 +945,8 @@ function hud(ctx, s, me, t) {
     ctx.fillStyle = g; ctx.fillRect(W / 2 - 125, H - 24, 250 * clamp(boss.hp / boss.max, 0, 1), 8);
     ctx.fillStyle = 'rgba(255,255,255,.5)';
     ctx.fillRect(W / 2 - 125 + 250 * 0.33, H - 24, 1.5, 8); ctx.fillRect(W / 2 - 125 + 250 * 0.66, H - 24, 1.5, 8);
-    if (boss.sh) { ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff3b0'; ctx.fillText('SHIELDED', W / 2, H - 36); }
+    ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = boss.sh ? '#fff3b0' : '#ffccbc';
+    ctx.fillText((BOSS_NAMES[boss.kind] || 'BOSS').toUpperCase() + (boss.sh ? '  -  SHIELDED' : ''), W / 2, H - 36);
   }
 }
 
@@ -939,6 +1003,50 @@ function lens(ctx) {
   }
 }
 
+const MUT_LABEL = { rapid: 'Egg storm', glass: 'Glass hull', swarm: 'Swarm', drought: 'Drought', heavy: 'Thick hides', fast: 'Hyperdrive' };
+
+// The sweeper's laser: a flickering dashed warning line first, then the beam itself.
+function beams(ctx, s, t) {
+  for (const c of s.chickens) {
+    if (!c.beam) continue;
+    const b = c.beam, ox = c.x, oy = c.y + 30, ex = ox + Math.sin(b.a) * 1000, ey = oy + Math.cos(b.a) * 1000;
+    ctx.save(); ctx.lineCap = 'round';
+    if (!b.on && b.t < 1.0) {
+      ctx.strokeStyle = 'rgba(255,60,60,' + (settings.reduceFlash ? 0.4 : 0.25 + 0.25 * Math.sin(t * 24)) + ')'; ctx.lineWidth = 3; ctx.setLineDash([14, 10]);
+      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
+    } else if (b.on) {
+      ctx.globalCompositeOperation = 'lighter';
+      for (const [w, col] of [[30, 'rgba(255,60,60,.22)'], [14, 'rgba(255,140,120,.55)'], [5, 'rgba(255,255,255,.95)']]) {
+        ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+}
+
+// Role abilities: Nova ring, Aegis dome, Mend ring.
+function pulses(ctx, s) {
+  for (const p of s.fxPulse || []) {
+    const a = clamp(1 - p.life / p.max, 0, 1), inv = 1 - a;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    if (p.kind === 'nova') {
+      const r = p.r * (1 - (1 - a) ** 3);
+      ctx.strokeStyle = 'rgba(255,170,60,' + inv + ')'; ctx.lineWidth = 16 * inv + 3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.stroke();
+      if (!settings.reduceFlash) { ctx.fillStyle = 'rgba(255,230,180,' + 0.35 * inv * inv + ')'; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill(); }
+    } else if (p.kind === 'aegis') {
+      ctx.fillStyle = 'rgba(90,170,255,' + 0.22 * inv + ')'; ctx.strokeStyle = 'rgba(170,215,255,' + 0.9 * inv + ')'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (0.6 + 0.4 * Math.min(1, a * 3)), 0, 7); ctx.fill(); ctx.stroke();
+    } else {
+      const r = p.r * Math.min(1, a * 2.2);
+      ctx.strokeStyle = 'rgba(105,240,174,' + inv + ')'; ctx.lineWidth = 6 * inv + 2; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.stroke();
+      ctx.fillStyle = 'rgba(190,255,215,' + inv + ')';
+      for (let i = 0; i < 8; i++) { const ang = (i / 8) * Math.PI * 2; ctx.fillRect(p.x + Math.cos(ang) * r * 0.7 - 1.5, p.y + Math.sin(ang) * r * 0.7 - 6 - a * 18, 3, 12); }
+    }
+    ctx.restore();
+  }
+}
+
 // chain-lightning from the arc caster (kept in the sim state for a few frames)
 function arcs(ctx, s) {
   if (!s.fxArcs) return;
@@ -960,9 +1068,9 @@ function arcs(ctx, s) {
 // ---------- main ----------
 let lastT = 0, startWave = -1, startCount = 0;
 
-export function draw(ctx, s, me, t, { paused, silent } = {}) {
+export function draw(ctx, s, me, t, { paused, silent, quiet, replay } = {}) {
   const dt = clamp(t - lastT, 0, 0.1); lastT = t;
-  if (!paused) { detectEvents(s, me, t, silent); ambient(s); updateParts(dt); }
+  if (!paused) { detectEvents(s, me, t, silent || quiet); ambient(s); updateParts(dt); }
 
   if (s.wave !== startWave) { startWave = s.wave; startCount = s.chickens.length; }
   startCount = Math.max(startCount, s.chickens.length);
@@ -973,10 +1081,10 @@ export function draw(ctx, s, me, t, { paused, silent } = {}) {
   const mine = s.players[me];
   const wenv = {
     px: mine && mine.alive ? clamp((mine.x - W / 2) / (W / 2), -1, 1) : 0,
-    q: quality.level, beat: sfx.getBeat(), flare: getFlare(), bullets: s.bullets, spark: (x, y) => spark(x, y),
+    q: quality.level, beat: settings.reduceFlash ? 0 : sfx.getBeat(), flare: settings.reduceFlash ? 0 : getFlare(), bullets: s.bullets, spark: (x, y) => spark(x, y),
   };
 
-  const sh = shakeAmount();
+  const sh = settings.reduceFlash ? 0 : shakeAmount();
   ctx.save();
   if (sh > 0.5) ctx.translate((Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh);
   drawWorld(ctx, t, s.wave, wenv);
@@ -993,6 +1101,8 @@ export function draw(ctx, s, me, t, { paused, silent } = {}) {
   for (const e of s.eggs) egg(ctx, e, t);
   bullets(ctx, s.bullets);
   arcs(ctx, s);
+  beams(ctx, s, t);
+  pulses(ctx, s);
   for (const p of list) if (p.alive) ship(ctx, p, t);
   drawParts(ctx);
   if (list.length > 1) for (const p of list) if (p.alive) nameTag(ctx, p);
@@ -1000,7 +1110,7 @@ export function draw(ctx, s, me, t, { paused, silent } = {}) {
   if (quality.level >= 2) drawForeground(ctx, t, s.wave, wenv);
   vignette(ctx);
   ctx.restore();
-  if (quality.level >= 2 && !(pack.opts.pixel > 1)) lens(ctx);
+  if (quality.level >= 2 && !(pack.opts.pixel > 1) && !settings.reduceFlash) lens(ctx);
 
   if (pack.colors.overlay && pack.colors.overlayAlpha > 0) {
     const n = parseInt(pack.colors.overlay.slice(1), 16);
@@ -1028,7 +1138,7 @@ export function draw(ctx, s, me, t, { paused, silent } = {}) {
     ctx.fillStyle = 'rgba(0,0,12,.7)'; ctx.fillRect(0, 0, W, H);
     glowText(s.banner || 'Game over', H / 2 - 30, 50, '#ff7043');
     ctx.font = '18px system-ui, sans-serif'; ctx.fillStyle = '#e8eaf6';
-    ctx.fillText('Reached wave ' + s.wave + ' · Enter to restart (host) · Esc to leave', W / 2, H / 2 + 28);
+    ctx.fillText(replay ? 'Replay finished at wave ' + s.wave : 'Reached wave ' + s.wave + ' · Enter to restart (host) · Esc to leave', W / 2, H / 2 + 28);
     const mk = s.players[me];
     if (mk && mk.keys > 0) { ctx.fillStyle = '#ffd54f'; ctx.fillText('Keys collected: ' + mk.keys + ' — claim them in the menu', W / 2, H / 2 + 58); }
   }

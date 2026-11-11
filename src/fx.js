@@ -1,5 +1,6 @@
 import { H, W } from '../shared/sim.js';
 import { clamp, quality } from './util.js';
+import { settings } from './settings.js';
 import * as sfx from './audio.js';
 import { sparkColors } from './events-art.js';
 import { TRAIL_INFO } from '../shared/catalog.js';
@@ -34,6 +35,7 @@ export const lensRings = () => parts.filter((p) => p.type === 'ring' && p.lens);
 
 /** Returns the factor to scale simulation time by this frame (hit-stop / slow-mo). */
 export function timeScale(realDt) {
+  if (settings.reduceFlash) { hitStop = 0; slowMo = 0; return 1; }
   if (hitStop > 0) { hitStop -= realDt; return 0; }
   if (slowMo > 0) { slowMo -= realDt; return 0.28; }
   return 1;
@@ -78,7 +80,7 @@ function computeSummary(s) {
 }
 
 export function detectEvents(s, me, t, silent = false) {
-  const snd = silent ? { shoot() {}, kill() {}, hit() {}, gift() {}, revive() {}, wave() {}, flawless() {}, gameOver() {}, combo() {}, splat() {}, crack() {}, star() {} } : sfx;
+  const snd = silent ? { shoot() {}, kill() {}, hit() {}, gift() {}, revive() {}, wave() {}, flawless() {}, gameOver() {}, combo() {}, splat() {}, crack() {}, star() {}, ability() {}, bossLaser() {} } : sfx;
   const boss = s.chickens.find((c) => c.boss);
   const cur = {
     chickens: new Map(s.chickens.map((c) => [c.id, c])),
@@ -87,6 +89,7 @@ export function detectEvents(s, me, t, silent = false) {
     eggs: new Map(s.eggs.map((e) => [e.id, { x: e.x, y: e.y }])),
     players: Object.fromEntries(Object.values(s.players).map((p) => [p.id, { alive: p.alive, lives: p.lives, cd: p.cd, x: p.x, y: p.y, inv: p.inv, color: p.color }])),
     wave: s.wave, over: s.over, cleared: s.cleared, ph: boss ? boss.ph : 0, sh: boss ? boss.sh : 0, boss: !!boss,
+    pulses: new Set((s.fxPulse || []).map((p) => p.id)), beam: !!(boss && boss.beam),
   };
 
   if (prev && !s.over) {
@@ -165,6 +168,16 @@ export function detectEvents(s, me, t, silent = false) {
         snd.revive();
       }
     }
+    // role abilities and the sweeper laser
+    for (const pl of s.fxPulse || []) {
+      if (prev.pulses.has(pl.id)) continue;
+      snd.ability(pl.kind);
+      addShake(pl.kind === 'nova' ? 8 : 3);
+      const col = pl.kind === 'nova' ? '#ffb347' : pl.kind === 'aegis' ? '#90caf9' : '#69f0ae';
+      text(pl.x, pl.y - 34, pl.kind === 'nova' ? 'NOVA!' : pl.kind === 'aegis' ? 'AEGIS' : 'MEND', col, 22, 1);
+      burst(pl.x, pl.y, 24, [col, '#fff'], 260, 4, 0.7);
+    }
+    if (boss && boss.beam && !prev.beam) snd.bossLaser();
     // boss phase change: freeze-frame + lens ring
     if (boss && prev.boss && boss.ph > prev.ph) {
       hitStop = 0.08; addShake(14);

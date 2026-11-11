@@ -1,6 +1,7 @@
 // Shop catalog + pure profile logic. Shared by the server (authoritative) and the client (display).
 import { EVENTS } from './events.js';
 import { emptyRec, sanitizeRec, cleanName } from './leaderboard.js';
+import { defaultProgress, sanitizeProgress } from './progress.js';
 
 export const PALETTE = ['#4fc3f7', '#ff8a65', '#aed581', '#ce93d8', '#ffd54f', '#f06292'];
 export const SKINS = ['plain', 'stripes', 'flames', 'camo', 'checker', 'gold', 'neon', 'ghost', 'dragon', 'galaxy', 'pumpkin', 'frost', 'cupid', 'blossom'];
@@ -56,7 +57,8 @@ export const defaultProfile = () => ({
   equipped: { gun: null, skin: 'plain', paint: null, trail: 'ember' }, // paint null = default colour by seat
   stats: { runs: 0, bestWave: 0, totalKeys: 0 },
   name: 'Pilot',                                  // public name shown on the leaderboard
-  rec: { solo: emptyRec(), online: emptyRec() }, // run records behind the leaderboard and rating
+  rec: { solo: emptyRec(), online: emptyRec(), daily: emptyRec(), rush: emptyRec() }, // run records behind the leaderboard and rating
+  ...defaultProgress(),                          // xp, title, achievements, lifetime totals, weekly goals, season stars
 });
 
 export const parseItem = (item) => {
@@ -147,6 +149,7 @@ export function sanitizeProfile(raw) {
   for (const slot of Object.keys(SLOTS)) equipItem(d, slot, p.equipped?.[slot]);
   d.stats = { runs: num(p.stats?.runs), bestWave: num(p.stats?.bestWave), totalKeys: num(p.stats?.totalKeys) };
   d.name = cleanName(p.name);
-  d.rec = { solo: sanitizeRec(p.rec?.solo), online: sanitizeRec(p.rec?.online) };
+  d.rec = { solo: sanitizeRec(p.rec?.solo), online: sanitizeRec(p.rec?.online), daily: sanitizeRec(p.rec?.daily), rush: sanitizeRec(p.rec?.rush) };
+  Object.assign(d, sanitizeProgress(p));
   return d;
 }

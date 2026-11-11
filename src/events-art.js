@@ -148,10 +148,11 @@ export function eventFront(ctx, t, q) {
 // ---------- chickens (drawn in the chicken's local coordinates, head top at about y = -22) ----------
 export function eventHat(ctx, c, t) {
   const ev = theme.event;
-  if (!ev || c.boss) return;
+  if (!ev || (c.boss && !c.ev)) return;
   const tc = TIER_COL[c.tier || 0];
   ctx.save();
-  ctx.translate(0, -22);
+  ctx.translate(0, c.boss ? -34 : -22);
+  if (c.boss) ctx.scale(1.35, 1.35);
   if (ev === 'halloween') { // witch hat; the band shows the vest tier
     ctx.rotate(Math.sin(t * 3 + c.id) * 0.04);
     ctx.fillStyle = '#241238'; ctx.beginPath(); ctx.ellipse(0, 1, 15, 4, 0, 0, 7); ctx.fill();

@@ -20,3 +20,17 @@ export function shadowEllipse(ctx, x, y, rx, ry, a = 0.35) {
 /** Render quality: 2 = full effects, 1 = no foreground/lens/glow + cached backdrop + flat chickens, 0 = minimal. Adapts at runtime. */
 export const quality = { level: 2 };
 export const IS_TOUCH = typeof window !== 'undefined' && ('ontouchstart' in window || (navigator.maxTouchPoints || 0) > 0);
+
+/** Fullscreen helpers. requestFullscreen must be called from a user gesture (a tap or click). */
+export function enterFullscreen() {
+  try {
+    const el = document.documentElement;
+    if (document.fullscreenElement || !el.requestFullscreen) return;
+    const p = el.requestFullscreen({ navigationUI: 'hide' });
+    if (p && p.then) p.then(() => { try { window.screen.orientation?.lock?.('landscape').catch(() => {}); } catch { /* not supported */ } }).catch(() => {});
+  } catch { /* not allowed here */ }
+}
+export function exitFullscreen() {
+  try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch { /* ignore */ }
+}
+export function toggleFullscreen() { if (document.fullscreenElement) exitFullscreen(); else enterFullscreen(); }

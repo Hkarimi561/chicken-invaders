@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { IMAGE_SLOTS, SOUND_SLOTS, emptyPack, sanitizePack } from '../shared/packfmt.js';
 import * as P from './packs.js';
+import * as store from './profile.js';
+import Gallery from './Gallery.jsx';
 
 // Resource packs live in this browser (IndexedDB) and only change how YOUR game looks and sounds.
 export default function PackEditor({ onBack }) {
@@ -10,6 +12,7 @@ export default function PackEditor({ onBack }) {
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const importRef = useRef(null);
+  const [tab, setTab] = useState('mine'); // 'mine' | 'community'
 
   const reload = async () => setStored(await P.listPacks());
   useEffect(() => { reload(); }, []);
@@ -35,6 +38,16 @@ export default function PackEditor({ onBack }) {
     await reload();
     setDraft(clean);
   }, 'Saved');
+  const publish = (p) => {
+    const desc = window.prompt('Short description for the community gallery (optional):', '');
+    if (desc === null) return;
+    guard(async () => {
+      const r = await store.galleryPublish(sanitizePack(p), desc || '');
+      const link = location.origin + '/?pack=' + r.id;
+      try { await navigator.clipboard?.writeText(link); } catch { /* clipboard blocked */ }
+      setMsg('Saved to the gallery. Install link copied: ' + link);
+    });
+  };
   const onImport = (e) => {
     const f = e.target.files?.[0]; e.target.value = '';
     if (f) guard(async () => { const p = await P.importPackFile(f); await P.savePack(p); await reload(); }, 'Imported');
@@ -63,7 +76,13 @@ export default function PackEditor({ onBack }) {
       </div>
       {msg && <p className={/^(Saved|Now using|Imported|Deleted|Duplicated)/.test(msg) ? 'toast' : 'err'}>{msg}</p>}
 
-      <div className="shop-body">
+      <div className="tabs" role="tablist">
+        <button role="tab" aria-selected={tab === 'mine'} className={tab === 'mine' ? 'tab on' : 'tab'} onClick={() => setTab('mine')}>My packs</button>
+        <button role="tab" aria-selected={tab === 'community'} className={tab === 'community' ? 'tab on' : 'tab'} onClick={() => setTab('community')}>Community gallery</button>
+      </div>
+      {tab === 'community' && <Gallery onInstalled={async (p, use) => { await reload(); if (use) setActive(p.id); }} />}
+
+      <div className="shop-body" style={{ display: tab === 'mine' ? undefined : 'none' }}>
         <div className="shop-side packlist">
           <button className="small" onClick={create}>+ New pack</button>
           <button className="ghost small" onClick={() => importRef.current?.click()}>Import file…</button>
@@ -77,6 +96,7 @@ export default function PackEditor({ onBack }) {
                 {!p.builtin && <button className="ghost small" onClick={() => edit(p)}>Edit</button>}
                 {!p.builtin && <button className="ghost small" onClick={() => P.exportPack(p)}>Export</button>}
                 {!p.builtin && <button className="ghost small" onClick={() => duplicate(p)}>Copy</button>}
+                {!p.builtin && <button className="ghost small" onClick={() => publish(p)}>Share</button>}
                 {!p.builtin && <button className="ghost small" onClick={() => remove(p)}>✕</button>}
               </div>
             </div>
