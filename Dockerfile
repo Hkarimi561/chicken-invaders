@@ -1,35 +1,18 @@
 # syntax=docker/dockerfile:1
-
-# ---- build stage: install everything and bundle the React client ----
-FROM node:22-alpine AS build
-WORKDIR /app
-COPY package.json ./
-RUN npm install --no-audit --no-fund
-COPY index.html vite.config.js ./
-COPY public ./public
-COPY shared ./shared
-COPY src ./src
-RUN npm run build
-
-# ---- runtime stage: only what the server needs ----
-FROM node:22-alpine AS runtime
+# The multiplayer game server only (WebSockets need a long-running process, so it is not part of the Vercel
+# deployment). The website itself is a Next.js app: deploy it on Vercel.
+FROM node:22-alpine
 ENV NODE_ENV=production \
-    PORT=3000 \
-    DATA_DIR=/data
+    PORT=3001
 WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
-COPY server ./server
+COPY tsconfig.json ./
+COPY game-server ./game-server
+COPY lib ./lib
 COPY shared ./shared
-COPY --from=build /app/dist ./dist
-
-# player profiles (keys, unlocks) live here: mount a volume to keep them
-RUN mkdir -p /data && chown -R node:node /data /app
-VOLUME ["/data"]
 USER node
-
-EXPOSE 3000 3443
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${PORT}/api/info" >/dev/null || exit 1
-
-CMD ["node", "server/index.js"]
+EXPOSE 3001
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- "http://127.0.0.1:${PORT}/health" >/dev/null || exit 1
+CMD ["npx", "tsx", "game-server/index.ts"]

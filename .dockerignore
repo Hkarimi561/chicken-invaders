@@ -1,14 +1,5 @@
 node_modules
-dist
-data
+.next
 .git
-.gitignore
-.claude
-graphify-out
-*.log
-package-lock.json
-Dockerfile
-docker-compose.yml
-.dockerignore
-README.md
-scripts
+data
+.env*

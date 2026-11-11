@@ -1,45 +1,69 @@
 # Chicken Blasters
 
-An original co-op space shooter against chickens, built with React and Node. Single player and
-multiplayer (web and LAN) in the browser. All art, sound and code are original and generated procedurally.
+An original co-op space shooter against chickens. **Next.js + React + TypeScript** website, **Postgres**
+(Supabase) database, username + password accounts, and a small Node game server for online rooms.
+All art, sound and code are original and generated procedurally.
 
-## Run
+```
+Browser ── Next.js app (Vercel) ── Postgres (Supabase)
+   │            accounts, profiles, shop, runs, leaderboards, gallery   (app/, lib/)
+   └─ WebSocket ─ Game server (Node, any host with long-running processes)  (game-server/)
+                  rooms and the authoritative 60 Hz simulation; same database
+```
+
+Solo play, the daily challenge, boss rush, the shop, achievements, leaderboards and the pack gallery all work with
+just the website and the database. **Online rooms need the game server**, because WebSockets cannot run on Vercel's
+serverless functions; without it the Rooms screen simply says rooms are unavailable.
+
+## Accounts
+
+Create an account with just a **username** (3-16 letters, numbers, underscores; unique ignoring case) and a
+**password** (6+ characters). No e-mail or other questions. Passwords are hashed with bcrypt; the session is a signed,
+httpOnly cookie (30 days). Keys, unlocks, records and achievements live in your profile row, so they follow you to any
+device you sign in on. Login attempts are rate limited.
+
+## Run locally
 
 ```bash
 npm install
-npm run build
-npm start          # http://localhost:3000 (also prints your LAN address)
+cp .env.example .env.local      # optional: leave DATABASE_URL empty to use a JSON file (data/dev-db.json)
+npm run dev                     # website http://localhost:3000 + game server on :3001
 ```
 
-Development with hot reload: `npm run dev` (client on port 5173, game server on 3000).
-Tests: start the server, then `npm test`.
+Without `DATABASE_URL` the data goes to `data/dev-db.json` (development only; refused in production).
+Other scripts: `npm run build`, `npm start`, `npm run typecheck`, `npm test` (pure simulation tests, then the website and
+game server end to end on throw-away ports), `npm run db:migrate`, `npm run icons`.
 
-## Docker
+## Deploy: Supabase + Vercel
 
-```bash
-docker compose up --build -d     # http://localhost:3000, or http://<machine-ip>:3000 from other devices
-```
+1. **Database (Supabase).** Create a project. In *Project Settings -> Database -> Connection string* copy the
+   **Transaction pooler** string (port 6543) and put your password in it. Create the tables by pasting
+   `db/schema.sql` into the SQL editor, or run `DATABASE_URL=... npm run db:migrate`. (Row level security is turned on with no
+   policies, so the tables are not reachable through Supabase's public REST API; the app uses the direct connection.)
+2. **Website (Vercel).** Import the repository. Framework: Next.js (auto-detected). Environment variables:
+   - `DATABASE_URL`: the Supabase pooler string
+   - `SESSION_SECRET`: 24+ random characters (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
+   - `GAME_SERVER_URL`: public address of the game server (step 3); leave it out to run without online rooms
+3. **Game server (optional).** Run `game-server/` anywhere that keeps a process alive (Fly.io, Railway, Render, a VPS, ...):
+   ```bash
+   docker build -t chicken-game . && docker run -d -p 3001:3001 \
+     -e DATABASE_URL=... -e SESSION_SECRET=... -e ALLOWED_ORIGIN=https://your-game.vercel.app chicken-game
+   ```
+   (`docker compose up --build` does the same with the values from your environment.) It needs the **same**
+   `DATABASE_URL` and `SESSION_SECRET` as the website, and must be reachable over `https`/`wss`. Health check: `/health`.
+   The browser asks the website for a five-minute token, then connects to the game server with it.
 
-Or without compose:
-
-```bash
-docker build -t chicken-blasters .
-docker run -d -p 3000:3000 -v chicken-profiles:/data --name chicken-blasters chicken-blasters
-```
-
-The image is a two-stage build (Vite bundles the client, the runtime stage keeps only the server and
-production dependencies) and runs as a non-root user with a health check on `/api/info`.
-Player profiles (keys, unlocks, profile codes) are stored in `/data`: keep the volume to keep progress.
-Environment: `PORT` (default 3000), `DATA_DIR` (default `/data` in the image).
+Environment reference: see `.env.example`. `EVENT_OVERRIDE=halloween` forces a seasonal event for testing.
 
 ## Play
 
-- Keyboard: WASD / arrows + Space. Mouse: move to steer, hold left button to fire. Touch: on-screen stick + FIRE.
+- Keyboard: WASD / arrows + Space. Mouse: move to steer, hold left button to fire. Touch: floating stick + FIRE.
+- **Overheating:** holding fire builds heat (the bar under your ship). At the top the guns lock until they cool down.
+  Release the trigger to cool faster; the *Cooling* upgrade slows heat build-up. **Ice cubes** (dropped by chickens) reset the
+  cooldown at once and keep the guns cool for 5 seconds.
 - Co-op: create a room, share the link or QR code. Fly over a downed teammate for 1.5s to revive them.
 - Keys drop from chickens. Collect them in a run, claim them in the menu, and spend them in the
   Hangar & Shop on upgrades, guns, skins, paint and trails. Everyone starts with the standard plane.
-- Profiles are stored on the server (`data/profiles.json`, not committed). The secret profile code in the
-  shop lets you use the same account on another device.
 
 ## Leaderboard and rating
 
@@ -50,19 +74,14 @@ Menu -> *Leaderboard*. Two separate boards, each with *Rating*, *Best score*, *B
   time makes plausible (it caps both). Treat solo scores as best-effort.
 
 **Rating** is the average of your best five runs (a run is worth its score plus 150 per wave), so one lucky run
-cannot dominate. Your pilot name is public; profile codes never are. Results are stored with the profile in
-`data/profiles.json`.
+cannot dominate. Your pilot name is public; nothing else about your account is. Results are stored with your profile in the database.
 
 ## Gyroscope steering (phones and tablets)
 
 Tap the compass button in the game to steer by tilting the device (the pose you hold when you switch it on is the
-centre; tap the recentre button to reset it). FIRE stays on screen.
-
-Browsers only expose motion sensors on **secure pages**, so over a plain `http://<lan-ip>:3000` address the button
-explains this. The server therefore also listens on `https://<lan-ip>:3443` with a self-signed certificate
-(created on first start, kept in `data/`): open it once and choose to continue past the browser warning. The menu
-has a link that carries your profile over (in the URL fragment, never sent to the server). iOS asks for motion
-permission the first time. Set `HTTPS=0` to turn the secure listener off, or `HTTPS_PORT` to change the port.
+centre; tap the recentre button to reset it). FIRE stays on screen. Browsers only expose motion sensors on **secure
+pages**: the Vercel deployment is https, so it just works (iOS asks for motion permission the first time). Over plain
+`http://<lan-ip>:3000` during development the button explains this; use `next dev --experimental-https` to test it locally.
 
 ## Seasonal events
 
@@ -132,12 +151,14 @@ joystick appears under your thumb anywhere on the left half of the screen.
 ## Install as an app (PWA)
 
 In production the game is installable (manifest, icons, service worker) and single player works offline.
-Needs https or localhost (the built-in https listener on port 3443 works for this too).
+Needs https or localhost (Vercel provides https).
 
 ## Layout
 
-- `shared/` game simulation (runs in the browser and on the server) and the shop catalog
-- `server/` Express + WebSocket server, profile API
+- `app/` Next.js app (the page and the single API route); `lib/` server code: accounts, database stores, API handlers
+- `db/schema.sql` the Postgres schema
+- `shared/` game simulation (runs in the browser and on the game server), shop catalog, leaderboard and progression rules
 - `src/` React UI, canvas renderer, effects, procedural audio
-- `scripts/smoke.js`, `scripts/smoke2.js` headless tests (`npm test`)
-- `public/` PWA manifest, service worker and icons (`scripts/make-icons.mjs` regenerates them)
+- `game-server/` WebSocket rooms server
+- `public/` PWA manifest, service worker, icons, boss sound
+- `scripts/` tests (`test-all.ts`), database migration, icon generator

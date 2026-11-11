@@ -158,7 +158,8 @@ select { background: #0a0f2a; color: inherit; border: 1px solid #3949ab; border-
 .btn-skill::after { content: attr(data-label); position: relative; z-index: 1; text-align: center; padding: 0 4px; }
 .btn-skill.ready { box-shadow: 0 0 20px var(--c); }
 
-.savereplay { position: absolute; left: 50%; bottom: 14%; transform: translateX(-50%); z-index: 8; }
+.endbtns { position: absolute; left: 50%; bottom: calc(10% + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 8; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.endbtns button { min-width: 150px; min-height: 44px; }
 .replaybar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 8; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-radius: 999px; background: rgba(8, 12, 40, .88); border: 1px solid rgba(120, 150, 255, .4); max-width: 96vw; }
 .replaybar button { padding: 4px 10px; font-size: 13px; background: transparent; color: #fff; border: 1px solid #3949ab; border-radius: 999px; }
 .replaybar button.on { background: #3949ab; }
@@ -231,3 +232,8 @@ details.muts summary { cursor: pointer; font-size: 13px; }
 .gallery { display: flex; flex-direction: column; gap: 10px; }
 .chip:disabled { opacity: .5; }
 .row .grow { flex: 1; }
+
+/* ---- account ---- */
+.linklike { background: none; border: 0; padding: 0; color: #82b1ff; text-decoration: underline; cursor: pointer; font: inherit; }
+.card.auth { width: min(100%, 380px); }
+.card.auth button[type="submit"] { padding: 12px; font-size: 16px; }

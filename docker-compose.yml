@@ -1,17 +1,13 @@
+# The multiplayer game server. The website runs on Vercel (or `npm run dev` locally).
 services:
-  chicken-blasters:
+  game-server:
     build: .
-    image: chicken-blasters:latest
+    image: chicken-blasters-game:latest
     ports:
-      - "3000:3000"   # open http://<this-machine-ip>:3000 from any device on your network
-      - "3443:3443"   # https (self-signed): needed for gyroscope steering on phones
+      - "3001:3001"
     environment:
-      PORT: "3000"
-      DATA_DIR: /data
-      # EVENT_OVERRIDE: halloween   # force a seasonal event (halloween, christmas, valentine, nowruz) for testing
-    volumes:
-      - profiles:/data  # keeps keys, unlocks and profile codes across restarts
+      PORT: "3001"
+      DATABASE_URL: ${DATABASE_URL}        # the same Supabase connection string as the website
+      SESSION_SECRET: ${SESSION_SECRET}    # the same secret as the website
+      ALLOWED_ORIGIN: ${ALLOWED_ORIGIN:-}  # e.g. https://your-game.vercel.app
     restart: unless-stopped
-
-volumes:
-  profiles:
