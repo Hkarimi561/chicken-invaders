@@ -14,6 +14,24 @@ npm start          # http://localhost:3000 (also prints your LAN address)
 Development with hot reload: `npm run dev` (client on port 5173, game server on 3000).
 Tests: start the server, then `npm test`.
 
+## Docker
+
+```bash
+docker compose up --build -d     # http://localhost:3000, or http://<machine-ip>:3000 from other devices
+```
+
+Or without compose:
+
+```bash
+docker build -t chicken-blasters .
+docker run -d -p 3000:3000 -v chicken-profiles:/data --name chicken-blasters chicken-blasters
+```
+
+The image is a two-stage build (Vite bundles the client, the runtime stage keeps only the server and
+production dependencies) and runs as a non-root user with a health check on `/api/info`.
+Player profiles (keys, unlocks, profile codes) are stored in `/data`: keep the volume to keep progress.
+Environment: `PORT` (default 3000), `DATA_DIR` (default `/data` in the image).
+
 ## Play
 
 - Keyboard: WASD / arrows + Space. Mouse: move to steer, hold left button to fire. Touch: on-screen stick + FIRE.

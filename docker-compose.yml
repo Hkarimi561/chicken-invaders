@@ -1,0 +1,15 @@
+services:
+  chicken-blasters:
+    build: .
+    image: chicken-blasters:latest
+    ports:
+      - "3000:3000"   # open http://<this-machine-ip>:3000 from any device on your network
+    environment:
+      PORT: "3000"
+      DATA_DIR: /data
+    volumes:
+      - profiles:/data  # keeps keys, unlocks and profile codes across restarts
+    restart: unless-stopped
+
+volumes:
+  profiles:
