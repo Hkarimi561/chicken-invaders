@@ -22,7 +22,7 @@ async function api(path: string, body?: any) {
 export const offlineProfile = () => ({ ...defaultProfile(), offline: true });
 
 // ---- account ----
-export interface AccountUser { username: string }
+export interface AccountUser { username: string; admin?: boolean }
 /** The signed-in user, or null. Throws only when the server cannot be reached. */
 export const me = (): Promise<AccountUser | null> => api('/api/auth/me').then((j) => j.user);
 export const register = (username: string, password: string): Promise<AccountUser> => api('/api/auth/register', { username, password }).then((j) => j.user);
@@ -46,6 +46,15 @@ export const claimWeekly = (goal: string) => api('/api/weekly/claim', { goal }).
 export const claimSeason = (tier: number) => api('/api/season/claim', { tier }).then((j) => j.profile);
 export const setTitle = (title: string) => api('/api/title', { title }).then((j) => j.profile);
 export const achSeen = () => api('/api/ach/seen', {}).then((j) => j.profile);
+
+// ---- gift cards and the admin page ----
+export const redeemGift = (code: string) => api('/api/gift/redeem', { code });
+export const adminOverview = (q = '') => api('/api/admin/overview' + (q ? '?q=' + encodeURIComponent(q) : ''));
+export const adminGiftCreate = (g: { keys: number; uses: number; days: number; code: string; note: string }) => api('/api/admin/gift/create', g);
+export const adminGiftToggle = (code: string, disabled: boolean) => api('/api/admin/gift/toggle', { code, disabled });
+export const adminGiftDelete = (code: string) => api('/api/admin/gift/delete', { code });
+export const adminGrant = (username: string, keys: number) => api('/api/admin/grant', { username, keys });
+export const adminPassword = (username: string, password: string) => api('/api/admin/password', { username, password });
 
 // ---- rooms (served by the separate game server; empty when none is configured) ----
 export const listRooms = () => api('/api/rooms').then((j) => {

@@ -3,7 +3,7 @@
 export const W = 800;
 export const H = 600;
 /** Bump whenever a change would make an old recording play out differently. */
-export const SIM_VERSION = 5;
+export const SIM_VERSION = 6;
 
 import { PALETTE, SKINS, SHOP_GUN_IDS, TRAIL_INFO } from './catalog';
 import type { State, Player, Input, Loadout } from './types';
@@ -57,7 +57,7 @@ export function createState(seed: number = (Math.random() * 1e9) >>> 0, opts: an
     pattern: 'grid', gx: 0, gy: 0, gdir: 1, hw: 0, flaw: true, cleared: false,
     mut, rush: !!opts.rush, daily: !!opts.daily, ev: typeof opts.event === 'string' && /^[a-z]{3,12}$/.test(opts.event) ? opts.event : null,
     smul: 1 + 0.2 * mut.length, kmul: 1 + 0.25 * mut.length,
-    players: {}, chickens: [], bullets: [], eggs: [], gifts: [], fxArcs: [], fxPulse: [],
+    players: {}, chickens: [], bullets: [], eggs: [], gifts: [], fxArcs: [], fxPulse: [], meteors: [], meteorWave: false, mt: 0,
   };
 }
 
@@ -108,15 +108,19 @@ function bossKindFor(s: State) {
 
 function spawnWave(s: State) {
   s.wave++;
-  s.chickens = []; s.eggs = []; s.gy = 0; s.gx = 0; s.gdir = 1;
+  s.chickens = []; s.eggs = []; s.meteors = []; s.gy = 0; s.gx = 0; s.gdir = 1;
   s.flaw = true; s.cleared = false;
   const boss = s.rush || s.wave % 5 === 0;
+  // every fourth wave (that is not a boss wave) is a meteor strike: the chickens stop laying, rocks fall instead
+  s.meteorWave = !boss && s.wave >= 4 && s.wave % 4 === 0;
+  s.mt = 2.5;
   s.eff = s.rush ? s.wave * 5 : s.wave; // what difficulty scales with (a rush wave is a whole boss)
   const kind = boss ? bossKindFor(s) : null;
   const newWorld = (s.wave - 1) % 5 === 0 && s.wave > 1;
   const world = WORLD_NAMES[Math.floor((s.rush ? s.eff - 1 : s.wave - 1) / 5) % WORLD_NAMES.length];
   s.banner = boss ? (s.rush ? `Boss Rush ${s.wave} - ${BOSS_NAMES[kind]}` : `Wave ${s.wave} - ${BOSS_NAMES[kind]}`)
     : newWorld ? `Wave ${s.wave} - ${world}` : `Wave ${s.wave}`;
+  if (s.meteorWave) s.banner += ' - Meteor strike!';
   s.bt = 2.2;
   for (const p of Object.values(s.players)) {
     if (!p.alive) { p.alive = true; p.lives = 1; p.inv = invTime(p); p.rv = 0; }
@@ -340,6 +344,7 @@ export function step(s: State, dt) {
   for (const p of players) {
     p.cd -= dt; if (p.inv > 0) p.inv -= dt;
     if (p.ice > 0) p.ice = Math.max(0, p.ice - dt);
+    if (p.wt > 0 && (p.wt -= dt) <= 0) { p.wt = 0; p.weapon = p.base || 'blaster'; } // a picked-up gun wears off and the shop gun returns
     if (p.alive) {
       const firing = p.input.fire && !p.oh;
       if (p.oh) { p.heat = Math.max(0, p.heat - COOL_LOCK * dt); if (p.heat <= OH_RESUME) p.oh = false; }
@@ -382,7 +387,12 @@ export function step(s: State, dt) {
   let divers = 0, chicks = 0, minis = 0;
   for (const c of s.chickens) { if (c.dv) divers++; if (c.chick) chicks++; if (c.mini) minis++; }
   const maxDivers = s.wave >= 2 ? 1 + Math.floor(s.wave / 4) : 0;
-  const eggRate = (0.07 + s.wave * 0.008) * (has(s, 'rapid') ? 2 : 1);
+  // Eggs: the old per-chicken rate meant a big late wave rained hundreds of eggs. Now the whole formation shares a
+  // budget of egg events per second that grows slowly and is capped, there is a cap on eggs in flight, and they
+  // fall a little slower. Meteor-strike waves lay no eggs at all.
+  const layers = Math.max(1, s.chickens.length);
+  const budget = Math.min(3.2, 1.1 + 0.09 * s.wave) * (1 + 0.2 * (Math.max(1, players.length) - 1)) * (has(s, 'rapid') ? 2 : 1);
+  const eggRate = s.meteorWave ? 0 : Math.min(0.07 + s.wave * 0.008, budget / layers) * (has(s, 'rapid') ? 2 : 1) * (s.eggs.length >= 22 + 4 * players.length ? 0 : 1);
 
   for (const c of s.chickens) {
     if (c.fl > 0) c.fl -= dt;
@@ -461,7 +471,7 @@ export function step(s: State, dt) {
       }
       // egg drops: tiers behave differently (blue aims, green fires a triple)
       if (rnd(s) < eggRate * dt) {
-        const sp = 210 + s.wave * 8, down = Math.PI / 2;
+        const sp = Math.min(210 + s.wave * 8, 330), down = Math.PI / 2;
         if (c.tier === 4) for (const a of [-0.3, 0, 0.3]) eggAt(s, c.x, c.y + 14, down + a, sp);
         else if (c.tier === 3) {
           const tg = nearest(s, c.x, c.y);
@@ -554,6 +564,17 @@ export function step(s: State, dt) {
         if (b.dead) break;
       }
     }
+    if (!b.dead) for (const m of s.meteors) { // rocks can be shot down (two hits)
+      if (m.dead || m.warn > 0) continue;
+      const dx = b.x - m.x, dy = b.y - m.y;
+      if (dx * dx + dy * dy < (m.r + 4) * (m.r + 4)) {
+        if (owner) owner.hits++;
+        m.hp -= b.d;
+        if (m.hp <= 0) { m.dead = true; if (owner) { owner.score += Math.round(25 * s.smul); } }
+        if (b.pr) { b.hit.push(-m.id); if (--b.pr <= 0) b.dead = true; } else b.dead = true;
+        break;
+      }
+    }
   }
   s.bullets = s.bullets.filter((b) => !b.dead);
   s.chickens = s.chickens.filter((c) => !c.dead);
@@ -570,6 +591,30 @@ export function step(s: State, dt) {
     }
   }
   s.eggs = s.eggs.filter((e) => !e.dead);
+
+  // meteor strike: each rock is announced by a warning marker, then falls fast toward where a pilot was
+  if (s.meteorWave && s.bt <= 0 && !s.cleared && s.chickens.length) {
+    s.mt -= dt;
+    if (s.mt <= 0 && s.meteors.length < 6 + players.length) {
+      s.mt = Math.max(0.4, 1.15 - s.wave * 0.02) * (0.8 + rnd(s) * 0.5);
+      const alive = players.filter((p) => p.alive);
+      const tg = alive.length ? alive[Math.floor(rnd(s) * alive.length)] : null;
+      const x = clamp((tg ? tg.x : W / 2) + (rnd(s) - 0.5) * 220, 40, W - 40);
+      const dir = (rnd(s) - 0.5) * 0.5;
+      s.meteors.push({ id: s.nid++, x, y: -40, vx: dir * 260, vy: 0, sp: 420 + s.wave * 6, warn: 1.0, r: 24 + Math.floor(rnd(s) * 10), hp: 2, tx: x });
+    }
+  }
+  for (const m of s.meteors) {
+    if (m.warn > 0) { m.warn -= dt; if (m.warn <= 0) { m.warn = 0; m.vy = m.sp; } continue; }
+    m.x += m.vx * dt; m.y += m.vy * dt;
+    if (m.y > H + 50 || m.x < -50 || m.x > W + 50) { m.dead = true; continue; }
+    for (const p of players) {
+      if (!p.alive || p.inv > 0) continue;
+      const dx = m.x - p.x, dy = m.y - p.y, r = m.r + 14;
+      if (dx * dx + dy * dy < r * r) { m.dead = true; hitPlayer(s, p); break; }
+    }
+  }
+  s.meteors = s.meteors.filter((m) => !m.dead);
 
   // chicken body contact
   for (const c of s.chickens)
@@ -599,7 +644,15 @@ export function step(s: State, dt) {
         else if (g.k === 'life') p.lives = Math.min(5, p.lives + 1);
         else if (g.k === 'key') p.keys = (p.keys || 0) + 1;
         else if (g.k === 'ice') { p.heat = 0; p.oh = false; p.ice = 5; } // reset the gun and stay cool for 5 s
-        else if (g.k === 'wpn') { if (p.weapon === g.w) p.power = Math.min(5, p.power + 1); else p.weapon = g.w; }
+        else if (g.k === 'wpn') {
+          if (p.weapon === g.w) p.power = Math.min(5, p.power + 1);
+          else {
+            p.weapon = g.w;
+            // A pilot flying a gun from the shop keeps it: the capsule only lends its weapon for 30 seconds.
+            p.wt = (p.base || 'blaster') !== 'blaster' && g.w !== p.base ? 30 : 0;
+          }
+          if (g.w === p.base) p.wt = 0;
+        }
         p.score += g.k === 'food' ? 100 : 25;
         break;
       }

@@ -30,6 +30,7 @@ export interface State {
   mut: string[]; rush: boolean; daily: boolean; ev: string | null; smul: number; kmul: number;
   players: Record<string, Player>; chickens: Chicken[]; bullets: Bullet[]; eggs: Egg[]; gifts: Gift[];
   fxArcs: any[]; fxPulse: any[];
+  meteors: any[]; meteorWave: boolean; mt: number; // meteor-strike waves: warned rocks fall instead of eggs
   [k: string]: any;
 }
 

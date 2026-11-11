@@ -88,6 +88,7 @@ export function detectEvents(s: State, me, t, silent = false) {
     chickHp: new Map(s.chickens.map((c) => [c.id, c.hp])),
     gifts: new Map(s.gifts.map((g) => [g.id, g])),
     eggs: new Map(s.eggs.map((e) => [e.id, { x: e.x, y: e.y }])),
+    meteors: new Map((s.meteors || []).map((m) => [m.id, { x: m.x, y: m.y, r: m.r, warn: m.warn }])),
     players: Object.fromEntries(Object.values(s.players).map((p) => [p.id, { alive: p.alive, lives: p.lives, cd: p.cd, x: p.x, y: p.y, inv: p.inv, color: p.color }])),
     wave: s.wave, over: s.over, cleared: s.cleared, ph: boss ? boss.ph : 0, sh: boss ? boss.sh : 0, boss: !!boss,
     pulses: new Set((s.fxPulse || []).map((p) => p.id)), beam: !!(boss && boss.beam),
@@ -123,6 +124,13 @@ export function detectEvents(s: State, me, t, silent = false) {
         ring(W / 2, 110, 300, 0.6, COMBO_COL(combo.n), 3);
       }
       snd.kill(isBoss);
+    }
+    for (const [id, m] of prev.meteors || []) { // a rock was shot down or hit a pilot (rocks that leave the screen just vanish)
+      if (cur.meteors.has(id) || m.warn > 0 || m.y > H - 10 || m.x < 0 || m.x > W) continue;
+      burst(m.x, m.y, 16, ['#ffcc80', '#ff7043', '#8d6e63', '#fff'], 260, 4, 0.7, 'spark');
+      burst(m.x, m.y, 8, ['#6d4c41', '#8d6e63'], 160, 5, 0.9, 'shard');
+      ring(m.x, m.y, 260, 0.45, 'rgba(255,160,80,.8)', 3);
+      addShake(4);
     }
     for (const [id, g] of prev.gifts) {
       if (!cur.gifts.has(id) && g.y < H - 10) {

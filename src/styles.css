@@ -237,3 +237,23 @@ details.muts summary { cursor: pointer; font-size: 13px; }
 .linklike { background: none; border: 0; padding: 0; color: #82b1ff; text-decoration: underline; cursor: pointer; font: inherit; }
 .card.auth { width: min(100%, 380px); }
 .card.auth button[type="submit"] { padding: 12px; font-size: 16px; }
+
+/* ---- the play field keeps its 4:3 shape; the rest of the screen is filled with a blurred wash of the same picture ---- */
+.stage.full { background: #05081a; overflow: hidden; }
+.stage.full .ambient { position: absolute; inset: -8%; width: 116%; height: 116%; filter: blur(28px) saturate(1.35) brightness(.8); opacity: .9; pointer-events: none; }
+.stage.full .game { position: relative; z-index: 1; box-shadow: 0 0 60px 20px rgba(5, 8, 26, .55); }
+.stage.full .tools, .stage.full .gyronote { z-index: 6; }
+
+/* ---- gift card + admin ---- */
+.shop.gift .giftcard { margin: 12px auto; width: min(100%, 420px); }
+.shop.admin { width: min(100%, 1100px); }
+.shop.admin section.card { width: 100%; margin: 10px 0; }
+.shop.admin h3 { margin: 0 0 6px; }
+.adminform { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
+.tablewrap { overflow-x: auto; }
+.shop.admin table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.shop.admin th, .shop.admin td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #283593; white-space: nowrap; }
+.shop.admin tr.off { opacity: .5; }
+.shop.admin td.acts { display: flex; gap: 6px; }
+.shop.admin td .row { display: flex; gap: 6px; }
+.shop.admin td .row input { width: 140px; }

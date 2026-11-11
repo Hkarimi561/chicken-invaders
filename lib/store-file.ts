@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { sanitizeProfile } from '../shared/catalog';
-import type { Store, Profile, User, UserWithHash, RunRow, GalleryRow } from './store';
+import type { Store, Profile, User, UserWithHash, RunRow, GalleryRow, GiftRow, AdminUserRow, RedeemResult } from './store';
 
 interface Db {
   users: Record<string, { id: string; username: string; hash: string }>;
@@ -12,8 +12,10 @@ interface Db {
   runs: Record<string, RunRow>;
   gallery: Record<string, GalleryRow>;
   attempts: Record<string, number[]>;
+  gifts: Record<string, GiftRow & { used: string[] }>;
+  created: Record<string, number>;
 }
-const empty = (): Db => ({ users: {}, profiles: {}, runs: {}, gallery: {}, attempts: {} });
+const empty = (): Db => ({ users: {}, profiles: {}, runs: {}, gallery: {}, attempts: {}, gifts: {}, created: {} });
 
 export class FileStore implements Store {
   readonly kind = 'file' as const;
@@ -36,6 +38,7 @@ export class FileStore implements Store {
     if (Object.values(db.users).some((u) => u.username.toLowerCase() === username.toLowerCase())) return null;
     const id = crypto.randomUUID();
     db.users[id] = { id, username, hash };
+    db.created[id] = Date.now();
     db.profiles[id] = profile;
     this.save(db);
     return { id, username };
@@ -103,6 +106,55 @@ export class FileStore implements Store {
     if (!g) return false;
     if (!g.reports.includes(userId)) { g.reports.push(userId); this.save(db); }
     return true;
+  }
+
+  async listUsers(limit: number, search: string): Promise<AdminUserRow[]> {
+    const db = this.load();
+    const q = search.toLowerCase();
+    return Object.values(db.users).filter((u) => u.username.toLowerCase().includes(q)).slice(0, limit).map((u) => {
+      const p = db.profiles[u.id] || ({} as Profile);
+      return { id: u.id, username: u.username, created: db.created[u.id] || 0, keys: Number(p.keys) || 0, pending: Number(p.pending) || 0, runs: Number(p.stats?.runs) || 0, bestWave: Number(p.stats?.bestWave) || 0 };
+    });
+  }
+  async countUsers() { return Object.keys(this.load().users).length; }
+  async setPassword(userId: string, hash: string) {
+    const db = this.load();
+    if (!db.users[userId]) return false;
+    db.users[userId].hash = hash; this.save(db); return true;
+  }
+
+  async giftCreate(g: GiftRow) {
+    const db = this.load();
+    if (db.gifts[g.code]) return false;
+    db.gifts[g.code] = { ...g, uses: 0, disabled: false, used: [] };
+    this.save(db); return true;
+  }
+  async giftList(): Promise<GiftRow[]> {
+    return Object.values(this.load().gifts).map(({ used, ...g }) => g).sort((a, b) => b.created - a.created);
+  }
+  async giftSetDisabled(code: string, disabled: boolean) {
+    const db = this.load(); if (!db.gifts[code]) return false;
+    db.gifts[code].disabled = disabled; this.save(db); return true;
+  }
+  async giftDelete(code: string) {
+    const db = this.load(); if (!db.gifts[code]) return false;
+    delete db.gifts[code]; this.save(db); return true;
+  }
+  async giftRedeem(code: string, userId: string): Promise<RedeemResult> {
+    const db = this.load();
+    const g = db.gifts[code];
+    if (!g) return { ok: false, error: 'That gift card code is not valid' };
+    if (g.disabled) return { ok: false, error: 'That gift card is no longer active' };
+    if (g.expires && g.expires < Date.now()) return { ok: false, error: 'That gift card has expired' };
+    if (g.uses >= g.maxUses) return { ok: false, error: 'That gift card has already been used up' };
+    if (g.used.includes(userId)) return { ok: false, error: 'You already used this gift card' };
+    if (!db.profiles[userId]) return { ok: false, error: 'Unknown account' };
+    const profile = sanitizeProfile(db.profiles[userId]) as Profile;
+    profile.keys += g.keys;
+    db.profiles[userId] = profile;
+    g.uses++; g.used.push(userId);
+    this.save(db);
+    return { ok: true, keys: g.keys, profile };
   }
 
   async throttle(key: string, windowSec: number, max: number) {

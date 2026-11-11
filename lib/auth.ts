@@ -4,6 +4,9 @@ import bcrypt from 'bcryptjs';
 import { SignJWT, jwtVerify } from 'jose';
 
 export const COOKIE = 'cb_session';
+/** The one administrator account (hardcoded on purpose). Usernames are unique ignoring case, so nobody else can be "hamid". */
+export const ADMIN_USERNAME = 'hamid';
+export const isAdminName = (name: string) => String(name || '').toLowerCase() === ADMIN_USERNAME;
 const SESSION_DAYS = 30;
 
 const USERNAME_RE = /^[A-Za-z0-9_]{3,16}$/;

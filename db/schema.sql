@@ -61,3 +61,23 @@ alter table profiles       enable row level security;
 alter table runs           enable row level security;
 alter table gallery_packs  enable row level security;
 alter table auth_attempts  enable row level security;
+
+-- Gift cards: codes that add keys to an account. The admin creates them; each account can use a code once.
+create table if not exists gift_cards (
+  code       text primary key,
+  keys       integer not null,
+  max_uses   integer not null default 1,
+  uses       integer not null default 0,
+  note       text not null default '',
+  disabled   boolean not null default false,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz
+);
+create table if not exists gift_redemptions (
+  code    text not null references gift_cards(code) on delete cascade,
+  user_id uuid not null references users(id) on delete cascade,
+  at      timestamptz not null default now(),
+  primary key (code, user_id)
+);
+alter table gift_cards       enable row level security;
+alter table gift_redemptions enable row level security;

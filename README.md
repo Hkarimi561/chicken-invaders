@@ -55,12 +55,19 @@ game server end to end on throw-away ports), `npm run db:migrate`, `npm run icon
 
 Environment reference: see `.env.example`. `EVENT_OVERRIDE=halloween` forces a seasonal event for testing.
 
+## Gift cards and the admin page
+
+- **Gift card** (menu): enter a code to add keys to your account. A code works once per account, can have a limited number of uses and an expiry date.
+- **Admin** (menu, only for the account named `hamid`, hardcoded in `lib/auth.ts`): create, disable and delete gift cards, search users, give or take keys, and reset a user's password. Every admin endpoint re-checks on the server that the signed-in account is `hamid`; the button is only a convenience. After updating, run `db/schema.sql` again to add the gift card tables.
+
 ## Play
 
 - Keyboard: WASD / arrows + Space. Mouse: move to steer, hold left button to fire. Touch: floating stick + FIRE.
 - **Overheating:** holding fire builds heat (the bar under your ship). At the top the guns lock until they cool down.
   Release the trigger to cool faster; the *Cooling* upgrade slows heat build-up. **Ice cubes** (dropped by chickens) reset the
   cooldown at once and keep the guns cool for 5 seconds.
+- **Meteor strikes:** every fourth wave (that is not a boss wave) the chickens stop laying eggs and rocks fall instead: a warning marker shows where, then the rock drops fast. Shoot a rock twice to break it. Egg waves are capped, so late waves no longer drown you in eggs.
+- A weapon capsule lends its gun for 30 seconds if you fly a gun bought in the shop; the shop gun then comes back.
 - Co-op: create a room, share the link or QR code. Fly over a downed teammate for 1.5s to revive them.
 - Keys drop from chickens. Collect them in a run, claim them in the menu, and spend them in the
   Hangar & Shop on upgrades, guns, skins, paint and trails. Everyone starts with the standard plane.

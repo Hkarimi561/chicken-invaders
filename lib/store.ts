@@ -14,6 +14,10 @@ export interface GalleryRow {
   downloads: number; reports: string[]; created: number; pack?: any;
 }
 
+export interface GiftRow { code: string; keys: number; maxUses: number; uses: number; note: string; created: number; expires: number | null; disabled: boolean }
+export interface AdminUserRow { id: string; username: string; created: number; keys: number; pending: number; runs: number; bestWave: number }
+export type RedeemResult = { ok: true; keys: number; profile: Profile } | { ok: false; error: string };
+
 export interface Store {
   readonly kind: 'postgres' | 'file';
   /** Creates the user and their starting profile. Returns null when the name is taken. */
@@ -37,6 +41,19 @@ export interface Store {
   galleryInsert(row: GalleryRow): Promise<void>;
   galleryRemove(id: string, userId: string): Promise<boolean>;
   galleryReport(id: string, userId: string): Promise<boolean>;
+
+  // ---- admin ----
+  listUsers(limit: number, search: string): Promise<AdminUserRow[]>;
+  countUsers(): Promise<number>;
+  setPassword(userId: string, hash: string): Promise<boolean>;
+
+  // ---- gift cards ----
+  giftCreate(g: GiftRow): Promise<boolean>; // false when the code already exists
+  giftList(): Promise<GiftRow[]>;
+  giftSetDisabled(code: string, disabled: boolean): Promise<boolean>;
+  giftDelete(code: string): Promise<boolean>;
+  /** Atomically checks the card, records the use and adds its keys to the user's balance. */
+  giftRedeem(code: string, userId: string): Promise<RedeemResult>;
 
   /** Counts an attempt under `key` and says whether it is still within `max` per `windowSec`. */
   throttle(key: string, windowSec: number, max: number): Promise<boolean>;

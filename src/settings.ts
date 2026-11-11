@@ -14,7 +14,7 @@ const defaults = (): Settings => ({
   swapSides: false,       // joystick on the right, buttons on the left
   controlOpacity: 0.8,    // touch controls
   autoFire: false,        // fire without holding the button
-  fullscreen: IS_TOUCH,   // start games in fullscreen
+  fullscreen: true,       // start games in fullscreen
   music: 0.8,
   sfx: 1,
 });

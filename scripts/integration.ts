@@ -123,6 +123,54 @@ let ownerC;
   assert((await u.call('/api/ach/seen', {})).body.profile.achNew.length === 0, 'new-achievement markers can be acknowledged');
 }
 
+// ---------------------------------------------------------------- gift cards and the admin page
+{
+  const admin = await account('hamid');
+  assert((await admin.call('/api/auth/me')).body.user.admin === true, 'the hardcoded username hamid is the admin');
+  const u1 = await account(), u2 = await account(), u3 = await account();
+  assert((await u1.call('/api/auth/me')).body.user.admin === false, 'other users are not admins');
+  for (const [path, body] of [['/api/admin/overview'], ['/api/admin/gift/create', { keys: 5 }], ['/api/admin/grant', { username: u2.name, keys: 5 }], ['/api/admin/password', { username: u2.name, password: 'hacked1' }]]) {
+    assert((await u1.call(path, body)).status === 403, 'non-admins are refused: ' + path);
+  }
+  assert((await client().call('/api/admin/overview')).status === 401, 'the admin page needs a session');
+
+  const ov = (await admin.call('/api/admin/overview')).body;
+  assert(ov.total >= 4 && ov.users.some((x) => x.username === 'hamid'), 'the admin sees the user list');
+  assert((await admin.call('/api/admin/overview?q=' + u1.name)).body.users.length === 1, 'the user list can be searched');
+
+  assert((await admin.call('/api/admin/gift/create', { keys: 0 })).status === 400, 'a gift card needs at least 1 key');
+  const g = await admin.call('/api/admin/gift/create', { keys: 25, uses: 2, note: '<b>test' });
+  assert(g.status === 200 && /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(g.body.code), 'the admin can create a gift card with a random code');
+  assert((await admin.call('/api/admin/gift/create', { keys: 5, code: g.body.code })).status === 409, 'codes are unique');
+  const before = (await u1.call('/api/profile')).body.profile.keys;
+  const r1 = await u1.call('/api/gift/redeem', { code: g.body.code.toLowerCase().replace(/-/g, ' ') });
+  assert(r1.status === 200 && r1.body.keys === 25 && r1.body.profile.keys === before + 25, 'redeeming adds the keys (code is case/format tolerant)');
+  assert((await u1.call('/api/gift/redeem', { code: g.body.code })).status === 400, 'the same account cannot use a card twice');
+  assert((await u2.call('/api/gift/redeem', { code: g.body.code })).status === 200, 'a second account can use a multi-use card');
+  const third = await u3.call('/api/gift/redeem', { code: g.body.code });
+  assert(third.status === 400 && /used up/.test(third.body.error), 'a card stops working after its uses run out');
+  assert((await u3.call('/api/gift/redeem', { code: 'NOPE-NOPE-NOPE' })).status === 400, 'unknown codes are refused');
+  assert((await client().call('/api/gift/redeem', { code: g.body.code })).status === 401, 'redeeming needs an account');
+
+  const g2 = await admin.call('/api/admin/gift/create', { keys: 7, code: 'WELCOME7', days: 30 });
+  assert(g2.body.code === 'WELCOME7', 'custom codes work');
+  assert((await admin.call('/api/admin/gift/toggle', { code: 'WELCOME7', disabled: true })).status === 200, 'a card can be disabled');
+  assert(/no longer active/.test((await u3.call('/api/gift/redeem', { code: 'WELCOME7' })).body.error), 'a disabled card is refused');
+  await admin.call('/api/admin/gift/toggle', { code: 'WELCOME7', disabled: false });
+  assert((await u3.call('/api/gift/redeem', { code: 'welcome7' })).body.keys === 7, 'an enabled card works again');
+  assert((await admin.call('/api/admin/gift/delete', { code: 'WELCOME7' })).status === 200, 'a card can be deleted');
+  assert(!(await admin.call('/api/admin/overview')).body.gifts.some((x) => x.code === 'WELCOME7') && (await admin.call('/api/admin/overview')).body.gifts.every((x) => !x.note.includes('<')), 'deleted cards disappear and notes are cleaned');
+
+  const k0 = (await u2.call('/api/profile')).body.profile.keys;
+  assert((await admin.call('/api/admin/grant', { username: u2.name, keys: 40 })).body.keys === k0 + 40, 'the admin can give keys');
+  assert((await admin.call('/api/admin/grant', { username: u2.name, keys: -100000 })).status === 200 && (await u2.call('/api/profile')).body.profile.keys === 0, 'taking keys never goes below zero');
+  assert((await admin.call('/api/admin/grant', { username: 'nobody_here', keys: 5 })).status === 404, 'granting to an unknown user fails');
+  assert((await admin.call('/api/admin/password', { username: u3.name, password: 'abc' })).status === 400, 'new passwords follow the same rules');
+  assert((await admin.call('/api/admin/password', { username: u3.name, password: 'brandnew1' })).status === 200, 'the admin can reset a password');
+  const relog = client();
+  assert((await relog.call('/api/auth/login', { username: u3.name, password: 'secret1' })).status === 401 && (await relog.call('/api/auth/login', { username: u3.name, password: 'brandnew1' })).status === 200, 'the old password stops working, the new one works');
+}
+
 // ---------------------------------------------------------------- rooms (game server)
 const sockets = [];
 const waitFor = async (w, pred, ms = 4000) => { const t0 = Date.now(); for (;;) { const m = w.msgs.find(pred); if (m) return m; if (Date.now() - t0 > ms) throw new Error('timeout waiting for message'); await sleep(25); } };
@@ -249,5 +297,5 @@ const send = (w, m) => w.send(JSON.stringify(m));
 }
 
 for (const s of sockets) { try { s.terminate(); } catch { /* ignore */ } }
-console.log('integration ok: accounts, shop, runs, leaderboard, rooms, reconnect, gallery, PWA');
+console.log('integration ok: accounts, shop, runs, leaderboard, gift cards, admin, rooms, reconnect, gallery, PWA');
 process.exit(0);

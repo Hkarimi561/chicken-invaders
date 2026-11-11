@@ -9,6 +9,8 @@ import { levelOf, ACHIEVEMENTS } from '../shared/progress';
 import { EVENTS, activeEvent, nextEvent } from '../shared/events';
 import * as store from './profile';
 import AuthScreen from './AuthScreen';
+import GiftCard from './GiftCard';
+import Admin from './Admin';
 import { IS_TOUCH, enterFullscreen } from './util';
 import { settings } from './settings';
 import { theme, initTheme, setEventMode } from './theme';
@@ -252,6 +254,10 @@ export default function App() {
     return <Shell><Attract /><PackEditor onBack={() => setScreen('menu')} /></Shell>;
   if (screen === 'settings')
     return <Shell><Attract /><Settings onBack={() => setScreen('menu')} /></Shell>;
+  if (screen === 'gift')
+    return <Shell><Attract /><GiftCard profile={profile} setProfile={setProfile} onBack={() => { setScreen('menu'); refresh(); }} /></Shell>;
+  if (screen === 'admin' && user.admin)
+    return <Shell><Attract /><Admin onBack={() => setScreen('menu')} /></Shell>;
   if (screen === 'ach')
     return <Shell><Attract /><Achievements profile={profile} setProfile={setProfile} onBack={() => setScreen('menu')} /></Shell>;
   if (screen === 'replays')
@@ -311,6 +317,8 @@ export default function App() {
               <button className="ghost" onClick={() => setScreen('packs')}>🎨 Packs</button>
               <button className="ghost" onClick={() => setScreen('replays')}>⏪ Replays</button>
               <button className="ghost" onClick={() => setScreen('settings')}>⚙ Settings</button>
+              <button className="ghost" disabled={!!user.offline} onClick={() => setScreen('gift')}>🎁 Gift card</button>
+              {user.admin && <button className="ghost" onClick={() => setScreen('admin')}>🛠 Admin</button>}
             </div>
           </div>
         </div>

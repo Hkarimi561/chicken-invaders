@@ -357,6 +357,37 @@ function packChicken(ctx, c, t, slot) {
   }
 }
 
+// meteor strike: a pulsing warning marker where the rock will come down, then a burning rock with a fire trail
+function meteor(ctx, m, t) {
+  if (m.warn > 0) {
+    const a = 0.45 + 0.4 * Math.sin(t * 22), x = m.x;
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,80,60,${a})`; ctx.lineWidth = 2; ctx.setLineDash([6, 8]);
+    ctx.beginPath(); ctx.moveTo(x, 24); ctx.lineTo(x, H - 30); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = `rgba(255,70,50,${a + 0.2})`;
+    ctx.beginPath(); ctx.moveTo(x, 34); ctx.lineTo(x - 11, 10); ctx.lineTo(x + 11, 10); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('!', x, 26);
+    ctx.restore();
+    return;
+  }
+  const ang = Math.atan2(m.vy, m.vx), r = m.r;
+  ctx.save(); ctx.translate(m.x, m.y);
+  ctx.globalCompositeOperation = 'lighter'; // fire trail behind the direction of travel
+  ctx.rotate(ang - Math.PI / 2);
+  const g = ctx.createLinearGradient(0, 0, 0, -r * 4.2);
+  g.addColorStop(0, 'rgba(255,190,80,.75)'); g.addColorStop(0.5, 'rgba(255,90,30,.35)'); g.addColorStop(1, 'rgba(255,60,20,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(-r * 0.8, 0); ctx.lineTo(0, -r * 4.2 - Math.sin(t * 30 + m.id) * 6); ctx.lineTo(r * 0.8, 0); ctx.fill();
+  ctx.globalCompositeOperation = 'source-over'; ctx.rotate(-(ang - Math.PI / 2));
+  ctx.rotate(t * 2 + m.id);
+  ctx.fillStyle = radial(ctx, -r * 0.3, -r * 0.3, 2, r * 1.1, [[0, '#d7b89a'], [0.55, '#7a5a45'], [1, '#2e211a']]);
+  ctx.beginPath();
+  for (let i = 0; i < 9; i++) { const a = (i / 9) * Math.PI * 2, k = r * (0.82 + 0.22 * Math.sin(i * 2.7 + m.id)); i ? ctx.lineTo(Math.cos(a) * k, Math.sin(a) * k) : ctx.moveTo(Math.cos(a) * k, Math.sin(a) * k); }
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,.35)';
+  ctx.beginPath(); ctx.arc(r * 0.25, -r * 0.1, r * 0.22, 0, 7); ctx.arc(-r * 0.3, r * 0.3, r * 0.16, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,140,60,.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.restore();
+}
 function egg(ctx, e, t) {
   ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(Math.sin(t * 6 + e.x) * 0.3);
   shadowEllipse(ctx, 3, 4, 8, 10, 0.25);
@@ -1123,6 +1154,7 @@ export function draw(ctx, s: State, me, t, { paused, silent, quiet, replay }: { 
   }
   for (const g of s.gifts) gift(ctx, g, t);
   for (const e of s.eggs) egg(ctx, e, t);
+  for (const m of s.meteors || []) meteor(ctx, m, t);
   bullets(ctx, s.bullets);
   arcs(ctx, s);
   beams(ctx, s, t);

@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import { cookies, headers } from 'next/headers';
 import { getStore, type Profile } from './store';
 import {
-  COOKIE, checkCredentials, cookieOptions, hashPassword, signGameToken, signSession, verifyPassword, verifyToken, type Session,
+  COOKIE, ADMIN_USERNAME, isAdminName, checkCredentials, cookieOptions, hashPassword, signGameToken, signSession, verifyPassword, verifyToken, type Session,
 } from './auth';
 import { buyItem, equipItem, defaultProfile } from '../shared/catalog';
 import { EVENTS, activeEvent } from '../shared/events';
@@ -74,7 +74,8 @@ async function logout() {
 }
 
 async function me({ user }: Ctx) {
-  return json({ user: user ? { username: user.username } : null });
+  // `admin` only decides whether the Admin button is shown; every admin endpoint checks again on the server
+  return json({ user: user ? { username: user.username, admin: isAdminName(user.username) } : null });
 }
 
 // ---------------------------------------------------------------- profile
@@ -228,6 +229,83 @@ async function packsReport({ user, body }: Ctx) {
   return ok ? json({ ok: true }) : fail(404, 'Pack not found');
 }
 
+// ---------------------------------------------------------------- gift cards
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const normCode = (v: unknown) => String(v ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+const prettyCode = (c: string) => (c.length === 12 ? c.replace(/(.{4})(.{4})(.{4})/, '$1-$2-$3') : c);
+const randomCode = () => Array.from(crypto.randomBytes(12), (b) => CODE_ALPHABET[b % CODE_ALPHABET.length]).join('');
+
+async function giftRedeem({ user, body }: Ctx) {
+  const store = await getStore();
+  if (!(await store.throttle('gift:' + user!.uid, 600, 12))) return fail(429, 'Too many attempts. Wait a few minutes.');
+  const code = normCode(body.code);
+  if (code.length < 4) return fail(400, 'Enter your gift card code');
+  const r = await store.giftRedeem(code, user!.uid);
+  if (!r.ok) return fail(400, (r as { error: string }).error);
+  return json({ profile: (r as any).profile, keys: (r as any).keys });
+}
+
+// ---------------------------------------------------------------- admin (only the hardcoded admin account)
+async function adminOnly(user: Session): Promise<Response | null> {
+  const row = await (await getStore()).getUser(user.uid); // the database, not the cookie, says who this is
+  return row && isAdminName(row.username) ? null : fail(403, 'Admins only');
+}
+const giftOut = (g: any) => ({ ...g, code: prettyCode(g.code) });
+
+async function adminOverview({ user, query }: Ctx) {
+  const denied = await adminOnly(user!); if (denied) return denied;
+  const store = await getStore();
+  const [users, total, gifts] = await Promise.all([store.listUsers(100, String(query.get('q') || '').slice(0, 30)), store.countUsers(), store.giftList()]);
+  return json({ admin: ADMIN_USERNAME, total, users, gifts: gifts.map(giftOut) });
+}
+async function adminGiftCreate({ user, body }: Ctx) {
+  const denied = await adminOnly(user!); if (denied) return denied;
+  const keys = Math.floor(Number(body.keys)), maxUses = Math.floor(Number(body.uses) || 1), days = Math.floor(Number(body.days) || 0);
+  if (!(keys >= 1 && keys <= 100000)) return fail(400, 'Keys must be between 1 and 100000');
+  if (!(maxUses >= 1 && maxUses <= 100000)) return fail(400, 'Uses must be between 1 and 100000');
+  const wanted = normCode(body.code);
+  if (body.code && wanted.length < 4) return fail(400, 'A custom code needs 4-24 letters or numbers');
+  const store = await getStore();
+  const note = String(body.note ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 60);
+  const expires = days > 0 ? Date.now() + Math.min(days, 3650) * 86400_000 : null;
+  for (let i = 0; i < 5; i++) {
+    const code = wanted || randomCode();
+    if (await store.giftCreate({ code, keys, maxUses, uses: 0, note, created: Date.now(), expires, disabled: false })) return json({ code: prettyCode(code) });
+    if (wanted) return fail(409, 'That code already exists');
+  }
+  return fail(500, 'Could not create a unique code');
+}
+async function adminGiftToggle({ user, body }: Ctx) {
+  const denied = await adminOnly(user!); if (denied) return denied;
+  const ok = await (await getStore()).giftSetDisabled(normCode(body.code), !!body.disabled);
+  return ok ? json({ ok: true }) : fail(404, 'Gift card not found');
+}
+async function adminGiftDelete({ user, body }: Ctx) {
+  const denied = await adminOnly(user!); if (denied) return denied;
+  const ok = await (await getStore()).giftDelete(normCode(body.code));
+  return ok ? json({ ok: true }) : fail(404, 'Gift card not found');
+}
+async function adminGrant({ user, body }: Ctx) {
+  const denied = await adminOnly(user!); if (denied) return denied;
+  const keys = Math.trunc(Number(body.keys));
+  if (!Number.isFinite(keys) || keys === 0 || Math.abs(keys) > 100000) return fail(400, 'Enter a number of keys between -100000 and 100000 (not 0)');
+  const store = await getStore();
+  const target = await store.findUser(String(body.username || ''));
+  if (!target) return fail(404, 'No such user');
+  const r = await store.updateProfile(target.id, (p) => { p.keys = Math.max(0, p.keys + keys); return p.keys; });
+  return r ? json({ username: target.username, keys: r.result }) : fail(404, 'No such user');
+}
+async function adminPassword({ user, body }: Ctx) {
+  const denied = await adminOnly(user!); if (denied) return denied;
+  const err = checkCredentials('placeholder', body.password);
+  if (err) return fail(400, err);
+  const store = await getStore();
+  const target = await store.findUser(String(body.username || ''));
+  if (!target) return fail(404, 'No such user');
+  await store.setPassword(target.id, await hashPassword(String(body.password)));
+  return json({ ok: true });
+}
+
 // ---------------------------------------------------------------- misc
 async function info() {
   return json({ event: serverEvent(), online: !!gameServerUrl() });
@@ -274,6 +352,13 @@ const ROUTES: Record<string, Route> = {
   'POST run/start': R(true, runStart),
   'POST run/end': R(true, runEnd),
   'POST leaderboard': R(false, leaderboard),
+  'POST gift/redeem': R(true, giftRedeem),
+  'GET admin/overview': R(true, adminOverview),
+  'POST admin/gift/create': R(true, adminGiftCreate),
+  'POST admin/gift/toggle': R(true, adminGiftToggle),
+  'POST admin/gift/delete': R(true, adminGiftDelete),
+  'POST admin/grant': R(true, adminGrant),
+  'POST admin/password': R(true, adminPassword),
   'POST packs/publish': R(true, packsPublish),
   'GET packs': R(false, packsList),
   'POST packs/remove': R(true, packsRemove),

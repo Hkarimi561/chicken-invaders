@@ -89,7 +89,8 @@ const fmtTime = (ticks) => { const s = Math.floor(ticks / 60); return Math.floor
  * mode 'replay'   deterministic playback of a recorded run
  */
 export default function Game({ mode, net, onExit, name, loadout, run, replay, onRunEnd, onSaveReplay, secureUrl }: Record<string, any>) {
-  const cv = useRef(null);
+  const cv = useRef<HTMLCanvasElement>(null);
+  const amb = useRef<HTMLCanvasElement>(null); // blurred colour wash that fills the screen around the 4:3 play field
   const stage = useRef(null);
   const skillRef = useRef(null);
   const api = useRef<{ apply: (patch: Record<string, any>) => void; restartReplay: () => void }>({ apply: () => {}, restartReplay: () => {} });
@@ -112,6 +113,7 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
   const isReplay = mode === 'replay', isSpectate = mode === 'spectate', single = mode === 'single';
 
   useEffect(() => {
+    let ambFrame = 0; let ambCtx: CanvasRenderingContext2D | null = null;
     // alpha:false = cheaper compositing; desynchronized = lower input-to-photon latency where supported
     const ctx = cv.current.getContext('2d', { alpha: false, desynchronized: true });
     const pix = pack.opts.pixel || 1; // pixel-art packs render at a lower resolution and scale up
@@ -289,6 +291,7 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
         ctx.setTransform(1 / pix, 0, 0, 1 / pix, 0, 0);
         ctx.imageSmoothingEnabled = pix === 1;
         draw(ctx, s, me, now / 1000, { paused, quiet: isReplay, replay: isReplay });
+        if (amb.current && (ambFrame++ % 5 === 0)) { try { ambCtx ??= amb.current.getContext('2d'); ambCtx.drawImage(cv.current, 0, 0, 48, 36); } catch { /* ignore */ } }
         if (single && s.over && !reported) {
           if (recRef.current) { recRef.current.score = s.players.me?.score || 0; recRef.current.wave = s.wave; }
           setOverInfo({ canSave: !!recRef.current && recRef.current.inputs.length > 0 });
@@ -375,6 +378,7 @@ export default function Game({ mode, net, onExit, name, loadout, run, replay, on
 
   return (
     <div className="stage full" ref={stage}>
+      <canvas ref={amb} width={48} height={36} className="ambient" aria-hidden="true" />
       <canvas ref={cv} width={Math.round(W / pix)} height={Math.round(H / pix)} className={pix > 1 ? 'game pixelated' : 'game'} />
       <div className="tools">
         {(mode === 'multi' || isSpectate) && (

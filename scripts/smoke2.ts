@@ -29,7 +29,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const count = (opts) => { const s = createState(3, opts); addPlayer(s, 'a', 'A'); s.wave = 5; s.cleared = true; s.delay = 0; step(s, 1 / 60); return s.chickens.length; };
   assert(count({ mut: ['swarm'] }) > count({}), 'swarm: more chickens');
 
-  const eggs = (mut) => { const s = createState(4, { mut }); addPlayer(s, 'a', 'A'); s.wave = 11; s.cleared = true; s.delay = 0; for (let i = 0; i < 900; i++) { s.players.a.lives = 1e6; step(s, 1 / 60); } return s.nid; };
+  const eggs = (mut) => { const s = createState(4, { mut }); addPlayer(s, 'a', 'A'); s.wave = 12; s.cleared = true; s.delay = 0; for (let i = 0; i < 900; i++) { s.players.a.lives = 1e6; step(s, 1 / 60); } return s.nid; };
   assert(eggs(['rapid']) > eggs([]), 'egg storm: chickens lay more');
 
   const drift = (mut) => { const s = createState(5, { mut }); addPlayer(s, 'a', 'A'); s.wave = 3; s.cleared = true; s.delay = 0; for (let i = 0; i < 90; i++) step(s, 1 / 60); return Math.abs(s.gx); };
@@ -272,6 +272,60 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert(!p.oh && p.heat < 0.05 && p.ice > 4, 'an ice cube resets the cooldown');
   for (let i = 0; i < 180; i++) { p.inv = 9; step(s, 1 / 60); }
   assert(!p.oh && p.heat === 0, 'no heat builds up while the ice effect lasts');
+}
+
+// ---------------------------------------------------------------- egg budget, meteor strikes, borrowed guns
+{
+  // late waves no longer rain eggs
+  const s = createState(11); addPlayer(s, 'a', 'A');
+  s.wave = 13; // the next wave (14) is a normal grid wave
+  const p = s.players.a;
+  let maxEggs = 0, made = 0, seen = new Set();
+  for (let i = 0; i < 60 * 25; i++) { p.inv = 99; p.alive = true; step(s, 1 / 60); maxEggs = Math.max(maxEggs, s.eggs.length); for (const e of s.eggs) if (!seen.has(e.id)) { seen.add(e.id); made++; } }
+  assert(s.wave >= 14 && maxEggs <= 26, 'eggs in flight are capped (max ' + maxEggs + ')');
+  assert(made / 25 < 5, 'late waves lay a few eggs per second, not a rain (' + (made / 25).toFixed(1) + '/s)');
+}
+{
+  // meteor strike wave: warned rocks instead of eggs
+  const s = createState(5); addPlayer(s, 'a', 'A');
+  s.wave = 7; const p = s.players.a;
+  let rocks = 0, eggs = 0, warned = false, sawBanner = false;
+  const ids = new Set();
+  for (let i = 0; i < 60 * 14; i++) {
+    p.inv = 99; p.alive = true; step(s, 1 / 60);
+    if (s.banner.includes('Meteor')) sawBanner = true;
+    eggs += s.eggs.length;
+    for (const m of s.meteors) { if (m.warn > 0) warned = true; ids.add(m.id); }
+  }
+  assert(s.wave === 8 && s.meteorWave && sawBanner, 'wave 8 is a meteor strike');
+  assert(eggs === 0 && ids.size >= 5 && warned, 'a meteor wave lays no eggs; rocks come with a warning first (' + ids.size + ' rocks)');
+  // a falling rock hurts; a warning marker does not; bullets destroy rocks
+  const h = createState(6); addPlayer(h, 'a', 'A'); const hp = h.players.a; hp.inv = 0;
+  h.meteors.push({ id: 900, x: hp.x, y: hp.y, vx: 0, vy: 300, sp: 300, warn: 0, r: 26, hp: 2, tx: hp.x });
+  const lives = hp.lives; step(h, 1 / 60);
+  assert(hp.lives === lives - 1, 'a meteor hit costs a life');
+  const w = createState(6); addPlayer(w, 'a', 'A'); const wp = w.players.a; wp.inv = 0;
+  w.meteors.push({ id: 901, x: wp.x, y: wp.y, vx: 0, vy: 0, sp: 0, warn: 0.5, r: 26, hp: 2, tx: wp.x });
+  step(w, 1 / 60);
+  assert(wp.lives === lives, 'a warning marker is harmless');
+  const sh = createState(6); addPlayer(sh, 'a', 'A'); const sp = sh.players.a; sp.inv = 99; sp.x = 100; sp.y = 560;
+  sh.meteors.push({ id: 902, x: 400, y: 300, vx: 0, vy: 0, sp: 0, warn: 0, r: 26, hp: 2, tx: 400 });
+  for (let i = 0; i < 3; i++) sh.bullets.push({ x: 400, y: 300, vx: 0, vy: -1, o: 'a', w: 'b', d: 1 });
+  step(sh, 1 / 60);
+  assert(sh.meteors.length === 0, 'shooting a meteor twice destroys it');
+}
+{
+  // a weapon capsule only borrows the gun when you own a shop gun
+  const a = createState(3); addPlayer(a, 'a', 'A', { gun: 'scatter' }); const pa = a.players.a;
+  assert(pa.weapon === 'scatter' && pa.base === 'scatter', 'the shop gun is the starting weapon');
+  a.gifts.push({ id: 1, x: pa.x, y: pa.y, k: 'wpn', w: 'missile' }); pa.inv = 99; step(a, 1 / 60);
+  assert(pa.weapon === 'missile' && pa.wt > 29, 'a capsule lends its weapon for 30 seconds');
+  for (let i = 0; i < 60 * 31; i++) { pa.inv = 99; pa.alive = true; step(a, 1 / 60); }
+  assert(pa.weapon === 'scatter', 'the shop gun comes back afterwards');
+  const b = createState(3); addPlayer(b, 'a', 'A'); const pb = b.players.a;
+  b.gifts.push({ id: 1, x: pb.x, y: pb.y, k: 'wpn', w: 'missile' }); pb.inv = 99; step(b, 1 / 60);
+  for (let i = 0; i < 60 * 35; i++) { pb.inv = 99; pb.alive = true; step(b, 1 / 60); }
+  assert(pb.weapon === 'missile', 'without a shop gun the capsule weapon stays, as before');
 }
 
 console.log('features ok: mutators, roles, bosses, rush, daily, replay, progression, overheat');

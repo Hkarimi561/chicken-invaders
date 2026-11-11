@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { sanitizeProfile } from '../shared/catalog';
-import type { Store, Profile, User, UserWithHash, RunRow, GalleryRow } from './store';
+import type { Store, Profile, User, UserWithHash, RunRow, GalleryRow, GiftRow, AdminUserRow, RedeemResult } from './store';
 
 const META = 'id, owner_id, author, name, descr, size, thumb, downloads, reports, created_at';
 const toGallery = (r: any): GalleryRow => ({
@@ -125,6 +125,64 @@ export class PgStore implements Store {
     );
     if (r.rowCount) return true;
     return !!(await this.pool.query('select 1 from gallery_packs where id = $1', [id])).rowCount;
+  }
+
+  async listUsers(limit: number, search: string): Promise<AdminUserRow[]> {
+    const like = '%' + search.toLowerCase().replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+    const r = await this.pool.query(
+      'select u.id, u.username, u.created_at, p.data from users u left join profiles p on p.user_id = u.id where u.username_key like $2 order by u.created_at desc limit $1',
+      [limit, like],
+    );
+    return r.rows.map((x) => ({
+      id: x.id, username: x.username, created: new Date(x.created_at).getTime(),
+      keys: Number(x.data?.keys) || 0, pending: Number(x.data?.pending) || 0, runs: Number(x.data?.stats?.runs) || 0, bestWave: Number(x.data?.stats?.bestWave) || 0,
+    }));
+  }
+  async countUsers() { return (await this.pool.query('select count(*)::int as n from users')).rows[0].n; }
+  async setPassword(userId: string, hash: string) {
+    return !!(await this.pool.query('update users set password_hash = $2 where id = $1', [userId, hash])).rowCount;
+  }
+
+  async giftCreate(g: GiftRow) {
+    const r = await this.pool.query(
+      'insert into gift_cards (code, keys, max_uses, note, expires_at) values ($1, $2, $3, $4, $5) on conflict (code) do nothing returning code',
+      [g.code, g.keys, g.maxUses, g.note, g.expires ? new Date(g.expires) : null],
+    );
+    return !!r.rowCount;
+  }
+  async giftList(): Promise<GiftRow[]> {
+    const r = await this.pool.query('select * from gift_cards order by created_at desc limit 300');
+    return r.rows.map((x) => ({
+      code: x.code, keys: x.keys, maxUses: x.max_uses, uses: x.uses, note: x.note, disabled: x.disabled,
+      created: new Date(x.created_at).getTime(), expires: x.expires_at ? new Date(x.expires_at).getTime() : null,
+    }));
+  }
+  async giftSetDisabled(code: string, disabled: boolean) {
+    return !!(await this.pool.query('update gift_cards set disabled = $2 where code = $1', [code, disabled])).rowCount;
+  }
+  async giftDelete(code: string) { return !!(await this.pool.query('delete from gift_cards where code = $1', [code])).rowCount; }
+
+  async giftRedeem(code: string, userId: string): Promise<RedeemResult> {
+    const c = await this.pool.connect();
+    const no = async (error: string): Promise<RedeemResult> => { await c.query('rollback'); return { ok: false, error }; };
+    try {
+      await c.query('begin');
+      const g = (await c.query('select * from gift_cards where code = $1 for update', [code])).rows[0];
+      if (!g) return await no('That gift card code is not valid');
+      if (g.disabled) return await no('That gift card is no longer active');
+      if (g.expires_at && new Date(g.expires_at).getTime() < Date.now()) return await no('That gift card has expired');
+      if (g.uses >= g.max_uses) return await no('That gift card has already been used up');
+      const ins = await c.query('insert into gift_redemptions (code, user_id) values ($1, $2) on conflict do nothing returning code', [code, userId]);
+      if (!ins.rowCount) return await no('You already used this gift card');
+      const p = await c.query('select data from profiles where user_id = $1 for update', [userId]);
+      if (!p.rows[0]) return await no('Unknown account');
+      await c.query('update gift_cards set uses = uses + 1 where code = $1', [code]);
+      const profile = sanitizeProfile(p.rows[0].data) as Profile;
+      profile.keys += g.keys;
+      await c.query('update profiles set data = $2, updated_at = now() where user_id = $1', [userId, JSON.stringify(profile)]);
+      await c.query('commit');
+      return { ok: true, keys: g.keys, profile };
+    } catch (e) { await c.query('rollback').catch(() => {}); throw e; } finally { c.release(); }
   }
 
   async throttle(key: string, windowSec: number, max: number) {
