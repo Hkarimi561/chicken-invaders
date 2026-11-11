@@ -81,7 +81,7 @@ function computeSummary(s: State) {
 }
 
 export function detectEvents(s: State, me, t, silent = false) {
-  const snd = silent ? { shoot() {}, kill() {}, hit() {}, gift() {}, revive() {}, wave() {}, flawless() {}, gameOver() {}, combo() {}, splat() {}, crack() {}, star() {}, ability() {}, bossLaser() {}, explode() {} } : sfx;
+  const snd = silent ? { shoot() {}, kill() {}, hit() {}, gift() {}, revive() {}, wave() {}, flawless() {}, gameOver() {}, combo() {}, splat() {}, crack() {}, star() {}, ability() {}, bossLaser() {}, explode() {}, warn() {} } : sfx;
   const boss = s.chickens.find((c) => c.boss);
   const cur = {
     chickens: new Map(s.chickens.map((c) => [c.id, c])),
@@ -125,10 +125,19 @@ export function detectEvents(s: State, me, t, silent = false) {
       }
       snd.kill(isBoss);
     }
+    if (s.meteorWave && prev.wave !== cur.wave) { flare = Math.max(flare, 0.75); addShake(9); } // the strike begins: sky flash
+    for (const [id, m] of cur.meteors) { // a new rock is announced: a red shockwave runs along the ground
+      if ((prev.meteors || new Map()).has(id)) continue;
+      ring(m.x, H - 22, 240, 0.8, 'rgba(255,70,50,.85)', 3);
+      ring(m.x, H - 22, 130, 0.6, 'rgba(255,170,90,.7)', 2);
+      snd.warn();
+    }
     for (const [id, m] of prev.meteors || []) { // a rock was shot down or hit a pilot (rocks that leave the screen just vanish)
       if (cur.meteors.has(id) || m.warn > 0 || m.y > H - 10 || m.x < 0 || m.x > W) continue;
       burst(m.x, m.y, 16, ['#ffcc80', '#ff7043', '#8d6e63', '#fff'], 260, 4, 0.7, 'spark');
       burst(m.x, m.y, 8, ['#6d4c41', '#8d6e63'], 160, 5, 0.9, 'shard');
+      burst(m.x, m.y, 14, ['#ffab40', '#ff6e40', '#ffd180'], 210, 2, 1.5, 'shard'); // glowing embers that fall and fade
+      parts.push({ x: m.x, y: m.y, vx: 0, vy: -20, life: 0.9, max: 0.9, size: 9, c: '#4e342e', type: 'smoke', rot: 0 });
       ring(m.x, m.y, 260, 0.45, 'rgba(255,160,80,.8)', 3);
       addShake(4);
     }
@@ -225,6 +234,11 @@ export function ambient(s: State) {
   }
   for (const b of s.bullets) {
     if (b.w === 'm' && quality.level > 0) parts.push({ x: b.x, y: b.y + 8, vx: (Math.random() - 0.5) * 20, vy: 30, life: 0.5, max: 0.5, size: 4, c: '#b0bec5', type: 'smoke', rot: 0 });
+  }
+  for (const m of s.meteors || []) { // falling rocks shed embers and a smoke trail
+    if (m.warn > 0 || quality.level < 1) continue;
+    if (Math.random() < (quality.level >= 2 ? 0.8 : 0.35)) parts.push({ x: m.x + (Math.random() - 0.5) * m.r, y: m.y - m.r * 0.6, vx: (Math.random() - 0.5) * 50 - m.vx * 0.1, vy: -m.vy * 0.15, life: 0.5, max: 0.5, size: 2.5 + Math.random() * 2, c: Math.random() < 0.5 ? '#ffab40' : '#ff7043', type: 'spark', rot: 0 });
+    if (quality.level >= 2 && Math.random() < 0.4) parts.push({ x: m.x, y: m.y - m.r, vx: 0, vy: -m.vy * 0.05, life: 0.6, max: 0.6, size: 5, c: '#5d4037', type: 'smoke', rot: 0 });
   }
   // charging chickens leave motion streaks
   for (const c of s.chickens) {

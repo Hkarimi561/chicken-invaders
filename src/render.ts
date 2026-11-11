@@ -357,6 +357,27 @@ function packChicken(ctx, c, t, slot) {
   }
 }
 
+// Meteor-strike atmosphere: the sky turns red-brown, a hot glow sits on the horizon above, and faint rocks streak far away.
+let atmo = 0;
+function meteorSky(ctx, t, k) {
+  ctx.save();
+  ctx.fillStyle = `rgba(70,14,6,${0.34 * k})`; ctx.fillRect(0, 0, W, H);
+  const pulse = settings.reduceFlash ? 1 : 0.88 + 0.12 * Math.sin(t * 2.6);
+  const g = ctx.createLinearGradient(0, 0, 0, 240);
+  g.addColorStop(0, `rgba(255,120,40,${0.5 * k * pulse})`); g.addColorStop(0.45, `rgba(220,60,20,${0.2 * k * pulse})`); g.addColorStop(1, 'rgba(180,30,10,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, 240);
+  if (quality.level >= 1) { // distant rocks streaking across the sky
+    ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    for (let i = 0; i < 6; i++) {
+      const sp = 70 + (i % 3) * 30, ph = (t * sp + i * 160) % (H + 200);
+      const x = ((i * 137) % W) + ph * 0.35 - 100, y = ph - 100, len = 26 + (i % 3) * 14;
+      const grad = ctx.createLinearGradient(x, y, x - len * 0.35, y - len);
+      grad.addColorStop(0, `rgba(255,200,120,${0.5 * k})`); grad.addColorStop(1, 'rgba(255,90,30,0)');
+      ctx.strokeStyle = grad; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - len * 0.35, y - len); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
 // meteor strike: a pulsing warning marker where the rock will come down, then a burning rock with a fire trail
 function meteor(ctx, m, t) {
   if (m.warn > 0) {
@@ -1143,6 +1164,8 @@ export function draw(ctx, s: State, me, t, { paused, silent, quiet, replay }: { 
   ctx.save();
   if (sh > 0.5) ctx.translate((Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh);
   drawWorld(ctx, t, s.wave, wenv);
+  atmo += ((s.meteorWave && !s.over ? 1 : 0) - atmo) * Math.min(1, dt * 1.6);
+  if (atmo > 0.01) meteorSky(ctx, t, atmo);
 
   eventBack(ctx, t, quality.level);
   for (const p of list) if (!p.alive && !s.over) ghost(ctx, p, t);
@@ -1183,7 +1206,11 @@ export function draw(ctx, s: State, me, t, { paused, silent, quiet, replay }: { 
   };
   if (s.bt > 0 && !s.over && !silent) {
     ctx.globalAlpha = clamp(s.bt, 0, 1);
-    glowText(s.banner, H / 2 - 40, s.banner.length > 18 ? 34 : 44, s.banner.startsWith('Flawless') ? '#b2ff59' : '#ffd54f');
+    ctx.save();
+    const strike = s.banner.includes('Meteor');
+    if (strike && s.bt > 1.5 && !settings.reduceFlash) ctx.translate((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 5); // the banner shakes in
+    glowText(s.banner, H / 2 - 40, s.banner.length > 18 ? 34 : 44, strike ? '#ff7043' : s.banner.startsWith('Flawless') ? '#b2ff59' : '#ffd54f');
+    ctx.restore();
     ctx.globalAlpha = 1;
   }
   if (mine && !mine.alive && !s.over) {

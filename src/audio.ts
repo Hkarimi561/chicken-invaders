@@ -188,6 +188,12 @@ export function kill(isBoss) {
   noise({ dur: 0.1, vol: 0.08, freq: 1800 }); // soft pop under the cluck
   cluck();
 }
+/** Meteor warning: two quick low beeps. */
+export function warn() {
+  if (!ok('warn', 0.2)) return;
+  tone({ f: 520, f2: 480, type: 'square', dur: 0.07, vol: 0.05 });
+  tone({ f: 520, f2: 480, type: 'square', dur: 0.07, vol: 0.05, delay: 0.1 });
+}
 export function hit(own) {
   if (!ok('hit', 0.1)) return;
   if (playPack('hit', own ? 0.8 : 0.4)) return;
