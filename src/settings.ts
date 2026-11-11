@@ -5,7 +5,7 @@ import * as sfx from './audio';
 const KEY = 'cb-settings';
 export interface Settings {
   patterns: boolean; reduceFlash: boolean; stickSize: 'small' | 'medium' | 'large'; swapSides: boolean;
-  controlOpacity: number; autoFire: boolean; fullscreen: boolean; music: number; sfx: number;
+  controlOpacity: number; autoFire: boolean; fullscreen: boolean; music: number; sfx: number; costumes: boolean;
 }
 const defaults = (): Settings => ({
   patterns: false,        // colour-blind help: each vest tier also gets its own pattern
@@ -17,6 +17,7 @@ const defaults = (): Settings => ({
   fullscreen: true,       // start games in fullscreen
   music: 0.8,
   sfx: 1,
+  costumes: true,         // funny chicken characters (pirate, ninja, robot...)
 });
 
 export const settings: Settings = defaults();
@@ -35,6 +36,7 @@ export function loadSettings() {
   settings.fullscreen = typeof raw.fullscreen === 'boolean' ? raw.fullscreen : d.fullscreen;
   settings.music = num(raw.music, 0, 1, d.music);
   settings.sfx = num(raw.sfx, 0, 1, d.sfx);
+  settings.costumes = typeof raw.costumes === 'boolean' ? raw.costumes : d.costumes;
   sfx.setVolumes({ music: settings.music, sfx: settings.sfx });
 }
 

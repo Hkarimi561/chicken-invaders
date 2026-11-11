@@ -3,7 +3,7 @@
 export const W = 800;
 export const H = 600;
 /** Bump whenever a change would make an old recording play out differently. */
-export const SIM_VERSION = 6;
+export const SIM_VERSION = 7;
 
 import { PALETTE, SKINS, SHOP_GUN_IDS, TRAIL_INFO } from './catalog';
 import type { State, Player, Input, Loadout } from './types';
@@ -33,8 +33,12 @@ export const ROLES = {
 };
 export const ROLE_IDS = Object.keys(ROLES);
 
-export const BOSS_KINDS = ['rooster', 'mother', 'sweeper', 'splitter', 'mirror'];
-export const BOSS_NAMES = { rooster: 'Rooster King', mother: 'Mother Hen', sweeper: 'Laser Sweeper', splitter: 'The Splitter', mirror: 'Mirror Hen' };
+export const BOSS_KINDS = ['rooster', 'mother', 'sweeper', 'splitter', 'mirror', 'colonel', 'bomber', 'timewarp', 'magnet', 'ghost', 'lava', 'diva', 'cloner', 'tank', 'iceq'];
+export const BOSS_NAMES = {
+  rooster: 'Rooster King', mother: 'Mother Hen', sweeper: 'Laser Sweeper', splitter: 'The Splitter', mirror: 'Mirror Hen',
+  colonel: 'Colonel Cluck', bomber: 'Egg Bomber', timewarp: 'Time Warp Hen', magnet: 'Magnet Rooster', ghost: 'Ghost Hen',
+  lava: 'Lava Chicken', diva: 'Disco Diva', cloner: 'Cloner Cluck', tank: 'Armor Tank Hen', iceq: 'Ice Queen',
+};
 
 const rnd = (s: State) => {
   s.seed = (Math.imul(s.seed, 1664525) + 1013904223) >>> 0;
@@ -57,7 +61,7 @@ export function createState(seed: number = (Math.random() * 1e9) >>> 0, opts: an
     pattern: 'grid', gx: 0, gy: 0, gdir: 1, hw: 0, flaw: true, cleared: false,
     mut, rush: !!opts.rush, daily: !!opts.daily, ev: typeof opts.event === 'string' && /^[a-z]{3,12}$/.test(opts.event) ? opts.event : null,
     smul: 1 + 0.2 * mut.length, kmul: 1 + 0.25 * mut.length,
-    players: {}, chickens: [], bullets: [], eggs: [], gifts: [], fxArcs: [], fxPulse: [], meteors: [], meteorWave: false, mt: 0,
+    players: {}, chickens: [], bullets: [], eggs: [], gifts: [], fxArcs: [], fxPulse: [], meteors: [], meteorWave: false, mt: 0, zones: [],
   };
 }
 
@@ -103,12 +107,17 @@ const has = (s: State, id) => s.mut.includes(id);
 
 function bossKindFor(s: State) {
   const idx = s.rush ? s.wave - 1 : Math.floor(s.wave / 5) - 1;
-  return BOSS_KINDS[((idx % 5) + 5) % 5];
+  return BOSS_KINDS[((idx % BOSS_KINDS.length) + BOSS_KINDS.length) % BOSS_KINDS.length];
 }
+
+// Hazard zones used by the newer bosses: falling bombs, lava, clock bubbles, disco lanes and frost patches.
+const zone = (s: State, z) => { s.zones.push({ id: s.nid++, t: 0, ...z }); };
+const slowP = (p: Player, f: number) => { p.slf = Math.min(p.slw > 0 ? p.slf || 1 : 1, f); p.slw = 0.15; };
+const ring = (s: State, x, y, n, sp, rot = 0) => { for (let i = 0; i < n; i++) eggAt(s, x, y, rot + (i / n) * Math.PI * 2, sp); };
 
 function spawnWave(s: State) {
   s.wave++;
-  s.chickens = []; s.eggs = []; s.meteors = []; s.gy = 0; s.gx = 0; s.gdir = 1;
+  s.chickens = []; s.eggs = []; s.meteors = []; s.zones = []; s.gy = 0; s.gx = 0; s.gdir = 1;
   s.flaw = true; s.cleared = false;
   const boss = s.rush || s.wave % 5 === 0;
   // every fourth wave (that is not a boss wave) is a meteor strike: the chickens stop laying, rocks fall instead
@@ -127,12 +136,16 @@ function spawnWave(s: State) {
   }
   const nP = Math.max(1, Object.keys(s.players).length);
   if (boss) {
-    const base = { rooster: 30 + s.eff * 6, mother: 45 + s.eff * 8, sweeper: 34 + s.eff * 6, splitter: 36 + s.eff * 6, mirror: 32 + s.eff * 6 }[kind];
+    const base = {
+      rooster: 30 + s.eff * 6, mother: 45 + s.eff * 8, sweeper: 34 + s.eff * 6, splitter: 36 + s.eff * 6, mirror: 32 + s.eff * 6,
+      colonel: 34 + s.eff * 6, bomber: 32 + s.eff * 6, timewarp: 34 + s.eff * 6, magnet: 34 + s.eff * 6, ghost: 30 + s.eff * 6,
+      lava: 36 + s.eff * 6, diva: 34 + s.eff * 6, cloner: 36 + s.eff * 6, tank: 40 + s.eff * 7, iceq: 36 + s.eff * 6,
+    }[kind];
     const hp = base * nP;
     s.pattern = 'boss';
     s.chickens.push({
       id: s.nid++, x: W / 2, y: 110, hp, max: hp, r: kind === 'mother' ? 64 : 58, boss: true, kind, mother: kind === 'mother',
-      fl: 0, ph: 1, bt: 2, ent: 0, ed: 0, side: 0, ev: s.ev,
+      fl: 0, ph: 1, bt: 2, ent: 0, ed: 0, side: 0, ev: s.ev, ...(kind === 'tank' ? { arm: 3, ab: 0 } : {}),
     });
     return;
   }
@@ -170,7 +183,7 @@ function killChicken(s: State, c, owner: Player) {
     owner.charge = Math.min(100, (owner.charge || 0) + (c.boss ? 40 : 3 + 2 * (c.max || 1)));
     if (c.boss) owner.st.bosses++;
   }
-  const noDrops = has(s, 'drought') || c.mini;
+  const noDrops = has(s, 'drought') || c.mini || c.dec || c.sol;
   const drops = noDrops ? 0 : c.boss ? 4 : rnd(s) < 0.16 ? 1 : 0;
   for (let i = 0; i < drops; i++) {
     const r = rnd(s);
@@ -181,7 +194,7 @@ function killChicken(s: State, c, owner: Player) {
   }
   // keys are the shop currency: tougher vests, bosses, event bosses and harder rules drop more
   const chance = (0.04 + 0.02 * (c.tier || 0)) * s.kmul;
-  const keys = c.boss ? (c.mother ? 5 : 3) + (c.ev ? 2 : 0) + s.mut.length : c.chick || c.mini ? 0 : rnd(s) < chance ? 1 : 0;
+  const keys = c.boss ? (c.mother ? 5 : 3) + (c.ev ? 2 : 0) + s.mut.length : c.chick || c.mini || c.dec || c.sol ? 0 : rnd(s) < chance ? 1 : 0;
   for (let i = 0; i < keys; i++) s.gifts.push({ id: s.nid++, x: c.x + (i - (keys - 1) / 2) * 22, y: c.y, k: 'key' });
 }
 
@@ -205,7 +218,12 @@ function chain(s: State, from, owner: Player, n) {
 }
 
 function damage(s: State, c, d, owner: Player) {
-  if (c.dead || c.sh) return; // a shield (mother hen wings, splitter while its pieces live) absorbs everything
+  if (c.dead || c.sh || c.hid) return; // a shield (mother hen wings, splitter while its pieces live) absorbs everything
+  if (c.kind === 'tank' && c.boss && c.arm > 0 && !c.open) { // front armor soaks hits; every 8 absorbed breaks a plate
+    c.fl = 0.08; c.ab = (c.ab || 0) + d;
+    if (c.ab >= 8) { c.ab = 0; c.arm--; }
+    return;
+  }
   c.hp -= d; c.fl = 0.08;
   if (owner) owner.score += 1;
   if (c.hp <= 0) { c.dead = true; killChicken(s, c, owner); }
@@ -271,6 +289,7 @@ function fire(s: State, p: Player) {
     }
   }
   p.cd *= 1 - 0.05 * (p.mods?.cooling || 0); // gun cooling upgrade
+  if (p.slw > 0) p.cd /= p.slf || 1; // inside a clock bubble or frost: the gun is slow too
   if (p.role === 'striker') p.cd *= 0.88;
   // overheating: every shot adds heat in proportion to the weapon's delay; the cooling upgrade makes it build slower
   if (p.ice <= 0) {
@@ -314,6 +333,50 @@ function bossAttack(s: State, c) {
   const tg = nearest(s, c.x, c.y);
   const sp = 200 + (s.eff || s.wave) * 4;
   const slow = has(s, 'rapid') ? 0.6 : 1;
+  c.n = (c.n || 0) + 1;
+  const odd = c.n % 2 === 1;
+  const alive = Object.values(s.players).filter((p) => p.alive);
+  const pick = () => (alive.length ? alive[Math.floor(rnd(s) * alive.length)] : null);
+  if (c.kind === 'bomber' && odd) { // giant eggs: a warning circle shows where each one lands; shoot them down to defuse
+    for (let i = 0; i < c.ph; i++) {
+      const p = pick();
+      const x = clamp((p ? p.x : W / 2) + (i ? (rnd(s) - 0.5) * 200 : 0), 60, W - 60);
+      const y = clamp((p ? p.y : H - 120) + (i ? (rnd(s) - 0.5) * 120 : 0), H * 0.45, H - 40);
+      zone(s, { k: 'bomb', x, y, sx: c.x, sy: c.y + 40, cx: c.x, cy: c.y + 40, fall: 1.5, r: 78, hp: 2 });
+    }
+    c.bt = 2.4 * slow; return;
+  }
+  if (c.kind === 'timewarp' && odd && !s.zones.some((z) => z.k === 'clock')) { // a clock bubble that chases a pilot
+    zone(s, { k: 'clock', x: tg ? tg.x : W / 2, y: tg ? tg.y : H - 100, r: 90, life: 4.5 });
+    c.bt = 2.4 * slow; return;
+  }
+  if (c.kind === 'lava' && odd) { // fireballs leave lava puddles that burn for 5 s
+    const n = 2 + c.ph;
+    for (let i = 0; i < n && s.zones.filter((z) => z.k === 'lava').length < 9; i++) {
+      const p = pick();
+      zone(s, { k: 'lava', x: clamp((p ? p.x : W / 2) + (rnd(s) - 0.5) * 240, 50, W - 50), y: clamp((p ? p.y : H - 100) + (rnd(s) - 0.5) * 160, H * 0.5, H - 40), sx: c.x, sy: c.y + 40, fall: 0.9, life: 5, r: 42 });
+    }
+    c.bt = 2.3 * slow; return;
+  }
+  if (c.kind === 'diva') { // lit floor lanes flash, then strike on the beat together with a laser ring
+    const L = 8, lw = W / L, cols = new Set<number>();
+    if (tg) cols.add(clamp(Math.floor(tg.x / lw), 0, L - 1));
+    while (cols.size < 1 + c.ph) cols.add(Math.floor(rnd(s) * L));
+    let first = true;
+    for (const col of cols) { zone(s, { k: 'lane', x: (col + 0.5) * lw, w: lw, warn: 1.0, on: 0.35, col, ring: first }); first = false; }
+    c.bt = (2.8 - 0.2 * c.ph) * slow; return;
+  }
+  if (c.kind === 'iceq') {
+    if (odd) { // aimed ice shards: a hit freezes a pilot instead of costing a life
+      const base = tg ? Math.atan2(tg.y - c.y, tg.x - c.x) : Math.PI / 2, n = 2 + c.ph;
+      for (let i = 0; i < n; i++) {
+        const a = base + (i - (n - 1) / 2) * 0.22, v = sp + 40;
+        s.eggs.push({ id: s.nid++, x: c.x, y: c.y + 40, vx: Math.cos(a) * v, vy: Math.sin(a) * v, fz: 1 });
+      }
+      c.bt = 1.4 * slow; return;
+    }
+    if (s.zones.filter((z) => z.k === 'frost').length < 3) { const p = pick(); zone(s, { k: 'frost', x: clamp((p ? p.x : W / 2) + (rnd(s) - 0.5) * 160, 70, W - 70), y: clamp((p ? p.y : H - 100), H * 0.55, H - 50), r: 95, life: 7 }); }
+  }
   if (c.ph === 1) { // fan
     for (const a of [-0.35, 0, 0.35]) eggAt(s, c.x, c.y + 40, Math.PI / 2 + a, sp);
     c.bt = 1.2;
@@ -344,6 +407,8 @@ export function step(s: State, dt) {
   for (const p of players) {
     p.cd -= dt; if (p.inv > 0) p.inv -= dt;
     if (p.ice > 0) p.ice = Math.max(0, p.ice - dt);
+    if (p.frz > 0) p.frz = Math.max(0, p.frz - dt);
+    if (p.slw > 0) p.slw = Math.max(0, p.slw - dt);
     if (p.wt > 0 && (p.wt -= dt) <= 0) { p.wt = 0; p.weapon = p.base || 'blaster'; } // a picked-up gun wears off and the shop gun returns
     if (p.alive) {
       const firing = p.input.fire && !p.oh;
@@ -362,7 +427,8 @@ export function step(s: State, dt) {
     p.charge = Math.min(100, (p.charge || 0) + dt * 2 * (p.role === 'striker' ? 1.25 : 1));
     if (i.ab && !p.abHeld && p.charge >= 100) useAbility(s, p);
     p.abHeld = i.ab ? 1 : 0;
-    const sp = 340 * (1 + 0.06 * (p.mods?.engine || 0)) * (p.role === 'tank' ? 0.92 : 1);
+    const frozen = p.frz > 0;
+    const sp = 340 * (1 + 0.06 * (p.mods?.engine || 0)) * (p.role === 'tank' ? 0.92 : 1) * (p.slw > 0 ? p.slf || 1 : 1) * (frozen ? 0 : 1);
     if (Number.isFinite(i.tx) && Number.isFinite(i.ty)) { // mouse / gyro: glide toward the target
       const dx = i.tx - p.x, dy = i.ty - p.y, d = Math.hypot(dx, dy);
       if (d > 0.5) { const m = Math.min(d, sp * 1.35 * dt); p.x += (dx / d) * m; p.y += (dy / d) * m; }
@@ -370,9 +436,14 @@ export function step(s: State, dt) {
       p.x += ((i.right ? 1 : 0) - (i.left ? 1 : 0)) * sp * dt;
       p.y += ((i.down ? 1 : 0) - (i.up ? 1 : 0)) * sp * dt;
     }
+    const mg = s.chickens.find((c) => c.kind === 'magnet' && c.boss && c.pl);
+    if (mg) { // magnet rooster: a steady pull toward him (you can out-fly it)
+      const pull = 70 + 35 * mg.ph, dx = mg.x - p.x, dy = mg.y - p.y, d = Math.hypot(dx, dy) || 1;
+      p.x += (dx / d) * pull * dt; p.y += (dy / d) * pull * 0.5 * dt;
+    }
     p.x = clamp(p.x, 24, W - 24);
     p.y = clamp(p.y, H * 0.45, H - 30);
-    if (i.fire && p.cd <= 0 && !p.oh) { const n0 = s.bullets.length; fire(s, p); p.shots += s.bullets.length - n0; }
+    if (i.fire && p.cd <= 0 && !p.oh && !frozen) { const n0 = s.bullets.length; fire(s, p); p.shots += s.bullets.length - n0; }
   }
 
   // chickens
@@ -410,12 +481,29 @@ export function step(s: State, dt) {
       if (c.mb <= 0) { const tg = nearest(s, c.x, c.y); eggAt(s, c.x, c.y + 20, tg ? Math.atan2(tg.y - c.y, tg.x - c.x) : Math.PI / 2, 230 + (s.eff || s.wave) * 3); c.mb = 1.7; }
       continue;
     }
+    if (c.dec) { // cloner's decoys swing in step with the real boss, a quarter-turn apart
+      const b = s.chickens.find((x) => x.boss);
+      if (!b) { c.dead = true; continue; }
+      c.x = W / 2 + Math.sin((b.ang || 0) + c.off) * 250; c.y = 110 + Math.sin(s.t * 1.3 + c.off) * 20;
+      c.mb -= dt;
+      if (c.mb <= 0) { const tg = nearest(s, c.x, c.y); eggAt(s, c.x, c.y + 40, tg ? Math.atan2(tg.y - c.y, tg.x - c.x) : Math.PI / 2, 220 + (s.eff || s.wave) * 3); c.mb = 2.6; }
+      continue;
+    }
+    if (c.sol) { // colonel's squad flies in a V under him and fires aimed eggs
+      const b = s.chickens.find((x) => x.boss);
+      if (!b) { c.dead = true; continue; }
+      c.x = clamp(b.x + (c.si - 2) * 64, 30, W - 30); c.y = b.y + 125 - Math.abs(c.si - 2) * 18 + Math.sin(s.t * 2 + c.si) * 4;
+      c.mb -= dt;
+      if (c.mb <= 0) { const tg = nearest(s, c.x, c.y); eggAt(s, c.x, c.y + 18, tg ? Math.atan2(tg.y - c.y, tg.x - c.x) : Math.PI / 2, 215 + (s.eff || s.wave) * 3); c.mb = 2.3 + c.si * 0.15; }
+      continue;
+    }
     let bx, by;
     if (c.boss) {
       const ratio = c.hp / c.max;
       c.ph = ratio > 0.66 ? 1 : ratio > 0.33 ? 2 : 3;
       if (c.mother) c.sh = c.ph === 3 && s.t % 6 > 4 ? 1 : 0; // wings shield every 6s
       else if (c.kind === 'splitter') c.sh = minis > 0 ? 1 : 0;  // invulnerable while its pieces live
+      else if (c.kind === 'colonel') c.sh = s.chickens.some((x) => x.ld && !x.dead) ? 1 : 0; // shielded until the squad leader falls
       else c.sh = 0;
       by = 110 + Math.sin(s.t * 1.3) * 20;
       if (c.kind === 'mirror') {
@@ -439,6 +527,25 @@ export function step(s: State, dt) {
         const k = c.kind === 'sweeper' ? 0.5 : 1;
         c.ang = (c.ang || 0) + dt * ((c.kind === 'sweeper' ? 0.45 : 0.6) + 0.25 * k * c.ph);
         bx = W / 2 + Math.sin(c.ang) * (c.kind === 'sweeper' ? 200 : 250);
+        if (c.kind === 'ghost') { // fades out, glides (unseen) to where a pilot is, and returns with a burst of eggs
+          c.gt = (c.gt ?? 4) - dt;
+          if (!c.hid && c.gt <= 0) { const tg = nearest(s, c.x, c.y); c.hid = 1; c.gt = 2.4; c.gx = clamp(tg ? tg.x : W / 2, 90, W - 90); }
+          else if (c.hid && c.gt <= 0) { c.hid = 0; c.gt = 5.5 - 0.5 * c.ph; ring(s, c.x, c.y, 10, 175, s.t); }
+          const lim = (c.hid ? 450 : 400) * dt, tx = c.hid ? c.gx : bx;
+          c.ax = (c.ax ?? W / 2) + clamp(tx - (c.ax ?? W / 2), -lim, lim);
+          bx = c.ax;
+        }
+        if (c.kind === 'tank') { // a telegraphed charge at a pilot; the armor opens while she is charging
+          c.dtm = (c.dtm ?? 5) - dt;
+          if (c.dash == null && c.dtm <= 0) { const tg = nearest(s, c.x, c.y); c.dash = 0; c.dx = tg ? tg.x : W / 2; }
+          if (c.dash != null) {
+            c.dash += dt;
+            const u = c.dash / 1.8;
+            if (u >= 1) { c.dash = null; c.dtm = 7 - c.ph; c.open = 0; }
+            else { const e = Math.sin(u * Math.PI); bx += (c.dx - bx) * 0.3 * e; by += e * 300; c.open = 1; }
+          }
+          c.warn = c.dash == null && c.dtm < 0.7 ? 1 : 0;
+        }
       }
     } else if (s.pattern === 'grid') { bx = W / 2 + s.gx + c.ox; by = 80 + s.gy + c.oy; }
     else { const a = c.a + s.t * 0.8 * fk * c.dir; bx = W / 2 + Math.cos(a) * c.R; by = 190 + s.gy + Math.sin(a) * c.R * 0.55; }
@@ -480,7 +587,26 @@ export function step(s: State, dt) {
       }
     } else {
       c.bt -= dt;
-      if (c.bt <= 0) bossAttack(s, c);
+      if (c.bt <= 0) { if (c.hid) c.bt = 0.4; else bossAttack(s, c); }
+      if (c.kind === 'magnet') { // pull on for ~3 s, then a breather
+        c.pt = (c.pt ?? 3) - dt;
+        if (c.pt <= 0) { c.pl = c.pl ? 0 : 1; c.pt = c.pl ? 3.2 : 3.6 - 0.3 * c.ph; }
+      }
+      if (c.kind === 'cloner') { // three look-alikes; only the real one has the boss health bar
+        c.ct = s.chickens.some((x) => x.dec) ? 4 : (c.ct ?? 2) - dt;
+        if (c.ct <= 0) {
+          for (let i = 0; i < 3; i++) s.chickens.push({ id: s.nid++, x: c.x, y: c.y, hp: 1, max: 1, tier: 0, r: 58, fl: 0, dec: true, kind: 'cloner', ent: 1, off: 1.4 + i * 1.7, mb: 1 + i * 0.6 });
+          c.ct = 9;
+        }
+      }
+      if (c.kind === 'colonel') { // squads: a leader and four soldiers; the boss is shielded while the leader lives
+        c.ct = s.chickens.some((x) => x.sol) ? 3 : (c.ct ?? 2.5) - dt;
+        if (c.ct <= 0) {
+          const lhp = 5 + Math.floor((s.eff || s.wave) / 3);
+          for (let i = 0; i < 5; i++) s.chickens.push({ id: s.nid++, x: c.x, y: c.y, hp: i === 2 ? lhp : 2, max: i === 2 ? lhp : 2, tier: 0, r: i === 2 ? 28 : 20, fl: 0, sol: true, ld: i === 2, si: i, ent: 1, mb: 1.2 + i * 0.25 });
+          c.ct = 4;
+        }
+      }
       if (c.mother && c.ph >= 2) { // nest spawns chicks
         c.cb = (c.cb ?? 1.5) - dt;
         if (c.cb <= 0 && chicks < 8) {
@@ -531,8 +657,47 @@ export function step(s: State, dt) {
     }
   }
 
+  // hazard zones of the newer bosses
+  if (s.zones.length) {
+    const bossC = s.chickens.find((x) => x.boss);
+    const inZ = (p, z, r) => (p.x - z.x) ** 2 + (p.y - z.y) ** 2 < r * r;
+    for (const z of s.zones) {
+      z.t += dt;
+      if (z.k === 'bomb') {
+        const u = Math.min(1, z.t / z.fall);
+        z.cx = z.sx + (z.x - z.sx) * u; z.cy = z.sy + (z.y - z.sy) * u;
+        if (z.t >= z.fall) {
+          z.dead = true;
+          for (const p of players) if (p.alive && inZ(p, z, z.r)) hitPlayer(s, p);
+          ring(s, z.x, z.y, 10, 170, z.id);
+        }
+      } else if (z.k === 'lava') {
+        if (z.t >= z.fall) {
+          if (z.t > z.fall + z.life) z.dead = true;
+          else for (const p of players) if (p.alive && p.inv <= 0 && inZ(p, z, z.r)) hitPlayer(s, p);
+        }
+      } else if (z.k === 'clock') {
+        const tg = nearest(s, z.x, z.y);
+        if (tg) { const dx = tg.x - z.x, dy = tg.y - z.y, d = Math.hypot(dx, dy) || 1, m = Math.min(d, 65 * dt); z.x += (dx / d) * m; z.y += (dy / d) * m; }
+        for (const p of players) if (p.alive && inZ(p, z, z.r)) slowP(p, 0.5);
+        if (z.t >= z.life) { z.dead = true; ring(s, z.x, z.y, 8, 150, z.id); }
+      } else if (z.k === 'lane') {
+        if (z.ring && !z.rd && z.t >= z.warn) { z.rd = 1; if (bossC) ring(s, bossC.x, bossC.y + 20, 12, 165, s.t); }
+        if (z.t >= z.warn && z.t < z.warn + z.on) for (const p of players) if (p.alive && Math.abs(p.x - z.x) < z.w / 2) hitPlayer(s, p);
+        if (z.t >= z.warn + z.on) z.dead = true;
+      } else if (z.k === 'frost') {
+        if (z.t > z.life) z.dead = true;
+        else for (const p of players) if (p.alive && inZ(p, z, z.r)) slowP(p, 0.7);
+      }
+    }
+    s.zones = s.zones.filter((z) => !z.dead);
+  }
+  const mgn = s.chickens.find((x) => x.kind === 'magnet' && x.boss && x.pl);
+  const clocks = s.zones.filter((z) => z.k === 'clock');
+
   // bullets
   for (const b of s.bullets) {
+    if (mgn) b.vx += clamp((mgn.x - b.x) * 2.2, -650, 650) * dt; // the magnet bends shots toward him
     if (b.h) { // homing
       let best = null, bd = 1e12;
       for (const c of s.chickens) { if (c.ent < 1) continue; const d = (c.x - b.x) ** 2 + (c.y - b.y) ** 2; if (d < bd) { bd = d; best = c; } }
@@ -546,7 +711,9 @@ export function step(s: State, dt) {
       }
       b.vx = Math.cos(ang) * sp; b.vy = Math.sin(ang) * sp;
     }
-    b.x += b.vx * dt; b.y += b.vy * dt;
+    let bdt = dt;
+    for (const z of clocks) if ((z.x - b.x) ** 2 + (z.y - b.y) ** 2 < z.r * z.r) { bdt = dt * 0.5; break; } // time runs slow inside a clock bubble
+    b.x += b.vx * bdt; b.y += b.vy * bdt;
     if (b.life !== undefined && (b.life -= dt) <= 0) { b.dead = true; continue; } // scatter pellets fall off
     if (b.y < -30 || b.y > H + 30 || b.x < -30 || b.x > W + 30) { b.dead = true; continue; }
     const owner = s.players[b.o];
@@ -564,6 +731,17 @@ export function step(s: State, dt) {
         if (b.dead) break;
       }
     }
+    if (!b.dead) for (const z of s.zones) { // falling giant eggs can be shot down
+      if (z.k !== 'bomb' || z.dead) continue;
+      const dx = b.x - z.cx, dy = b.y - z.cy;
+      if (dx * dx + dy * dy < 30 * 30) {
+        if (owner) owner.hits++;
+        z.hp -= b.d;
+        if (z.hp <= 0) { z.dead = true; z.def = 1; if (owner) owner.score += Math.round(25 * s.smul); }
+        if (b.pr) { b.hit.push(-z.id); if (--b.pr <= 0) b.dead = true; } else b.dead = true;
+        break;
+      }
+    }
     if (!b.dead) for (const m of s.meteors) { // rocks can be shot down (two hits)
       if (m.dead || m.warn > 0) continue;
       const dx = b.x - m.x, dy = b.y - m.y;
@@ -577,8 +755,9 @@ export function step(s: State, dt) {
     }
   }
   s.bullets = s.bullets.filter((b) => !b.dead);
+  if (s.zones.length) s.zones = s.zones.filter((z) => !z.dead);
   s.chickens = s.chickens.filter((c) => !c.dead);
-  if (s.pattern === 'boss' && !s.chickens.some((c) => c.boss)) s.chickens = []; // chicks / pieces leave with the boss
+  if (s.pattern === 'boss' && !s.chickens.some((c) => c.boss)) { s.chickens = []; s.zones = []; } // chicks / pieces / hazards leave with the boss
 
   // eggs
   for (const e of s.eggs) {
@@ -587,7 +766,11 @@ export function step(s: State, dt) {
     for (const p of players) {
       if (!p.alive) continue;
       const dx = e.x - p.x, dy = e.y - p.y;
-      if (dx * dx + dy * dy < 20 * 20) { e.dead = true; hitPlayer(s, p); break; }
+      if (dx * dx + dy * dy < 20 * 20) {
+        e.dead = true;
+        if (e.fz) { if (p.inv <= 0) p.frz = 1.4; } else hitPlayer(s, p); // ice shards freeze instead of hurting
+        break;
+      }
     }
   }
   s.eggs = s.eggs.filter((e) => !e.dead);
@@ -643,7 +826,7 @@ export function step(s: State, dt) {
         if (g.k === 'power') p.power = Math.min(5, p.power + 1);
         else if (g.k === 'life') p.lives = Math.min(5, p.lives + 1);
         else if (g.k === 'key') p.keys = (p.keys || 0) + 1;
-        else if (g.k === 'ice') { p.heat = 0; p.oh = false; p.ice = 5; } // reset the gun and stay cool for 5 s
+        else if (g.k === 'ice') { p.heat = 0; p.oh = false; p.ice = 5; s.zones = s.zones.filter((z) => z.k !== 'lava'); } // reset the gun, stay cool for 5 s, and cool the lava
         else if (g.k === 'wpn') {
           if (p.weapon === g.w) p.power = Math.min(5, p.power + 1);
           else {

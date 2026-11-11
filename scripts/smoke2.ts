@@ -105,12 +105,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---------------------------------------------------------------- bosses
 {
   const spawned = (wave, opts = {}) => { const s = createState(1, opts); addPlayer(s, 'a', 'A'); s.wave = wave - 1; s.cleared = true; s.delay = 0; step(s, 1 / 60); return s; };
-  for (const [w, k] of [[5, 'rooster'], [10, 'mother'], [15, 'sweeper'], [20, 'splitter'], [25, 'mirror'], [30, 'rooster']])
+  for (const [w, k] of [[5, 'rooster'], [10, 'mother'], [15, 'sweeper'], [20, 'splitter'], [25, 'mirror'], [30, 'colonel'], [35, 'bomber'], [40, 'timewarp'], [45, 'magnet'], [50, 'ghost'], [55, 'lava'], [60, 'diva'], [65, 'cloner'], [70, 'tank'], [75, 'iceq'], [80, 'rooster']])
     assert(spawned(w).chickens.find((c) => c.boss).kind === k, `wave ${w} boss is ${k}`);
-  assert(BOSS_KINDS.length === 5, 'five boss kinds');
+  assert(BOSS_KINDS.length === 15, 'fifteen boss kinds');
 
   // no boss may teleport (the swing/slide must be continuous across phase changes)
-  for (const wave of [15, 20, 25]) {
+  for (const wave of [15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75]) {
     const b = spawned(wave); b.players.a.x = 150;
     const boss = b.chickens.find((c) => c.boss);
     for (let i = 0; i < 240; i++) step(b, 1 / 60);
@@ -153,8 +153,47 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   mi.players.a.x = 100; for (let i = 0; i < 300; i++) { mi.players.a.lives = 99; step(mi, 1 / 60); }
   assert(mb.x > W / 2 + 100, 'the mirror boss slides to the opposite side from the pilot');
 
+  // newer bosses
+  const col = spawned(30); for (let i = 0; i < 300; i++) { col.players.a.lives = 99; step(col, 1 / 60); }
+  const cb = col.chickens.find((c) => c.boss);
+  assert(col.chickens.some((c) => c.ld) && cb.sh === 1, 'the colonel is shielded while his squad leader lives');
+  col.chickens = col.chickens.filter((c) => !c.ld); step(col, 1 / 60);
+  assert(cb.sh === 0, 'killing the squad leader drops the colonel shield');
+
+  const bo = spawned(35); bo.players.a.lives = 99;
+  bo.zones.push({ id: 900, t: 0, k: 'bomb', x: bo.players.a.x, y: bo.players.a.y, sx: 400, sy: 150, cx: 400, cy: 150, fall: 0.5, r: 78, hp: 2 });
+  bo.players.a.lives = 3; bo.players.a.inv = 0; for (let i = 0; i < 40; i++) step(bo, 1 / 60);
+  assert(bo.players.a.lives === 2 && !bo.zones.some((z) => z.id === 900), 'a giant egg that lands on a pilot hurts and explodes');
+  const bd = spawned(35); bd.zones.push({ id: 901, t: 0, k: 'bomb', x: 200, y: 250, sx: 200, sy: 250, cx: 200, cy: 250, fall: 5, r: 78, hp: 2 });
+  bd.bullets.push({ x: 200, y: 250, vx: 0, vy: 0, o: 'a', w: 'b', d: 2 }); step(bd, 1 / 60);
+  assert(!bd.zones.some((z) => z.id === 901), 'shooting a falling giant egg defuses it');
+
+  const iq = spawned(75); iq.players.a.inv = 0; iq.players.a.lives = 3; iq.delay = 99;
+  iq.eggs.push({ id: 950, x: iq.players.a.x, y: iq.players.a.y, vx: 0, vy: 0, fz: 1 }); step(iq, 1 / 60);
+  assert(iq.players.a.frz > 1 && iq.players.a.lives === 3, 'an ice shard freezes a pilot without costing a life');
+  const fx = iq.players.a.x; iq.players.a.input = { ...emptyInput(), right: 1 }; step(iq, 1 / 60);
+  assert(iq.players.a.x === fx, 'a frozen pilot cannot move');
+
+  const cl = spawned(65); for (let i = 0; i < 200; i++) { cl.players.a.lives = 99; step(cl, 1 / 60); }
+  assert(cl.chickens.filter((c) => c.dec).length === 3, 'the cloner makes three decoys');
+
+  const tk = spawned(70); for (let i = 0; i < 120; i++) { tk.players.a.lives = 99; step(tk, 1 / 60); }
+  const tb = tk.chickens.find((c) => c.boss), hp0 = tb.hp;
+  for (let i = 0; i < 8; i++) tk.bullets.push({ x: tb.x, y: tb.y, vx: 0, vy: 0, o: 'a', w: 'b', d: 1 });
+  step(tk, 1 / 60);
+  assert(tb.hp === hp0 && tb.arm === 2, 'the tank armor soaks bullets and a plate breaks after 8');
+
+  const lv = spawned(55); lv.players.a.inv = 0; lv.players.a.lives = 3; lv.delay = 99;
+  lv.zones.push({ id: 960, t: 0, k: 'lava', x: lv.players.a.x, y: lv.players.a.y, sx: 0, sy: 0, fall: 0.1, life: 5, r: 42 });
+  for (let i = 0; i < 15; i++) step(lv, 1 / 60);
+  assert(lv.players.a.lives === 2, 'standing in lava hurts');
+
+  const tw = spawned(40); tw.delay = 99;
+  tw.zones.push({ id: 970, t: 0, k: 'clock', x: tw.players.a.x, y: tw.players.a.y, r: 90, life: 4.5 }); step(tw, 1 / 60);
+  assert(tw.players.a.slw > 0 && tw.players.a.slf === 0.5, 'a clock bubble slows the pilot');
+
   // boss rush
-  const rush = createState(1, { rush: true }); addPlayer(rush, 'a', 'A'); rush.delay = 0; step(rush, 1 / 60);
+  const rush =createState(1, { rush: true }); addPlayer(rush, 'a', 'A'); rush.delay = 0; step(rush, 1 / 60);
   const r1 = rush.chickens.find((c) => c.boss);
   assert(rush.chickens.length === 1 && r1.kind === 'rooster' && rush.banner.startsWith('Boss Rush'), 'boss rush starts with a boss, no minions');
   for (let i = 0; i < 120; i++) step(rush, 1 / 60);

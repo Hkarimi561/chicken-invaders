@@ -10,6 +10,9 @@ import * as sfx from './audio';
 import { pack, drawSprite, getImg, chickenSlot } from './packs';
 import { eventBack, eventFront, eventHat, eventEgg, eventShip, eventWingStops } from './events-art';
 import { theme } from './theme';
+import { costumeBack, costumeFront } from './costumes';
+import { hasSkin, bossBody, bossBack, bossFront, skinAlpha } from './bossskins';
+import { drawFloorZones, drawAirZones, drawFrozen, drawIceShard } from './bossfx';
 import { TRAIL_INFO } from '../shared/catalog';
 import { detectEvents, ambient, updateParts, drawParts, shakeAmount, getFlare, getSummary, getCombo, heartLostAt, lensRings, spark, COMBO_COL } from './fx';
 
@@ -80,7 +83,11 @@ function vestDetail(ctx, c, vest) {
   cracks(ctx, c);
 }
 
-const KIND_RGB = { mother: '255,200,80', sweeper: '90,220,255', splitter: '190,110,255', mirror: '200,225,255' };
+const KIND_RGB = {
+  mother: '255,200,80', sweeper: '90,220,255', splitter: '190,110,255', mirror: '200,225,255',
+  colonel: '150,170,70', bomber: '255,160,40', timewarp: '120,140,255', magnet: '255,70,70', ghost: '180,230,255',
+  lava: '255,110,20', diva: '255,80,200', cloner: '0,220,220', tank: '170,185,200', iceq: '140,220,255',
+};
 
 // Colour-blind help: each vest tier gets its own pattern on top of its colour (clipped to the vest by the caller).
 function vestPattern(ctx, tier) {
@@ -128,7 +135,8 @@ function chicken(ctx, c, t, env) {
   const flap = Math.sin(t * (panic ? 22 : 11) + c.id * 1.7);
   const vest = c.chick ? null : vestOf(c.tier || 0);
   const entering = c.ent < 1;
-  const angry = !!c.dv || c.boss;
+  const angry = !!c.dv || c.boss || c.dec;
+  const skin = hasSkin(c);
 
   // look toward the nearest living player
   let lx = 0, ly = 0.7, bd = 1e12;
@@ -147,11 +155,12 @@ function chicken(ctx, c, t, env) {
     }
   }
   if (entering) ctx.globalAlpha = 0.3 + 0.7 * c.ent;
+  if (skin) ctx.globalAlpha *= skinAlpha(c);
   ctx.translate(c.x + (panic ? (Math.random() - 0.5) * 1.6 : 0), c.y + bob);
   ctx.scale(k, k);
 
   shadowEllipse(ctx, 7, 16, 20, 17, 0.3);
-  if (c.boss || c.mini) {
+  if (c.boss || c.mini || c.dec) {
     ctx.globalCompositeOperation = 'lighter';
     const rgb = KIND_RGB[c.kind] || (c.mini ? '190,110,255' : '255,60,60');
     ctx.fillStyle = radial(ctx, 0, 0, 10, 40, [[0, `rgba(${rgb},.45)`], [1, `rgba(${rgb},0)`]]);
@@ -174,6 +183,8 @@ function chicken(ctx, c, t, env) {
     }
   }
 
+  costumeBack(ctx, c, t);
+  if (skin) bossBack(ctx, c, t);
   // wings: extruded (dark copy underneath) then lit face; raised wide while shielding
   const spread = c.sh ? 1.6 + Math.sin(t * 8) * 0.06 : 0.5 + flap * 0.45;
   for (const side of [-1, 1]) {
@@ -197,6 +208,7 @@ function chicken(ctx, c, t, env) {
     ? radial(ctx, -7, -9, 2, 28, [[0, '#fffbd0'], [0.5, '#ffe36b'], [1, '#d9a21b']], 0, 2)
     : radial(ctx, -7, -9, 2, 28, [[0, '#ffffff'], [0.5, '#f3e6d0'], [1, '#bd9a6a']], 0, 2);
   body(); ctx.fill();
+  if (skin) bossBody(ctx, c, t);
 
   // vest (clipped to the body so it wraps the belly)
   if (vest) {
@@ -248,7 +260,7 @@ function chicken(ctx, c, t, env) {
     ctx.strokeStyle = '#300'; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(-11, -12); ctx.lineTo(-3, -9); ctx.moveTo(11, -12); ctx.lineTo(3, -9); ctx.stroke();
   }
-  if (c.boss && !c.mother) {
+  if (c.boss && !c.mother && !skin) {
     ctx.fillStyle = '#b8860b';
     ctx.beginPath(); ctx.moveTo(-9, -21); ctx.lineTo(-6, -29); ctx.lineTo(-3, -22); ctx.lineTo(1, -31); ctx.lineTo(4, -22); ctx.lineTo(8, -29); ctx.lineTo(11, -21); ctx.closePath(); ctx.fill();
     ctx.fillStyle = '#ffd54f';
@@ -265,11 +277,19 @@ function chicken(ctx, c, t, env) {
   ctx.fillStyle = '#ef6c00'; ctx.beginPath(); ctx.moveTo(0, 1 - (panic ? 1 : 0)); ctx.lineTo(5, 1 - (panic ? 1 : 0)); ctx.lineTo(0, 7 - bo); ctx.closePath(); ctx.fill();
   ctx.fillStyle = radial(ctx, -0.8, 11, 0.5, 4.5, [[0, '#ff8a80'], [1, '#c62828']]);
   ctx.beginPath(); ctx.ellipse(0, 12 + bo, 2.6, 4, 0, 0, 7); ctx.fill();
+  costumeFront(ctx, c, t);
+  if (skin) bossFront(ctx, c, t);
   if (panic) { // sweat drop
     ctx.fillStyle = 'rgba(140,210,255,.9)';
     ctx.beginPath(); ctx.moveTo(14, -16 + ((t * 6) % 3)); ctx.quadraticCurveTo(18, -9, 14, -8); ctx.quadraticCurveTo(10, -9, 14, -16 + ((t * 6) % 3)); ctx.fill();
   }
-  if (c.sh) { // golden wing-shield bubble
+  if (c.sh && c.kind === 'colonel') { // blue squad-leader shield
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = radial(ctx, 0, 0, 20, 50, [[0, 'rgba(120,200,120,.05)'], [1, 'rgba(120,220,120,.45)']]);
+    ctx.beginPath(); ctx.arc(0, 0, 50, 0, 7); ctx.fill();
+    ctx.strokeStyle = `rgba(180,255,180,${0.7 + Math.sin(t * 12) * 0.2})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(0, 0, 50, 0, 7); ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  } else if (c.sh) { // golden wing-shield bubble
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = radial(ctx, 0, 0, 20, 50, [[0, 'rgba(255,220,120,.05)'], [1, 'rgba(255,200,60,.5)']]);
     ctx.beginPath(); ctx.arc(0, 0, 50, 0, 7); ctx.fill();
@@ -299,6 +319,7 @@ function chickenLite(ctx, c, t) {
   if (c.ent < 1) ctx.globalAlpha = 0.3 + 0.7 * c.ent;
   ctx.translate(c.x, c.y + bob); ctx.scale(k, k);
   ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(6, 15, 19, 16, 0, 0, 7); ctx.fill();
+  costumeBack(ctx, c, t);
   ctx.fillStyle = c.chick ? '#e8c24a' : '#e6d2ae';
   for (const side of [-1, 1]) {
     ctx.save(); ctx.translate(side * 15, 2); ctx.rotate(side * (0.5 + flap * 0.45));
@@ -321,6 +342,7 @@ function chickenLite(ctx, c, t) {
   ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(-6.5, -6, 4.3, 0, 7); ctx.arc(6.5, -6, 4.3, 0, 7); ctx.fill();
   ctx.fillStyle = c.dv ? '#c00' : '#111'; ctx.beginPath(); ctx.arc(-6.5, -5, 2.2, 0, 7); ctx.arc(6.5, -5, 2.2, 0, 7); ctx.fill();
   ctx.fillStyle = '#ff9800'; ctx.beginPath(); ctx.moveTo(-5, 1); ctx.lineTo(5, 1); ctx.lineTo(0, 9); ctx.fill();
+  costumeFront(ctx, c, t);
   ctx.restore();
   if (!c.chick && c.hp < c.max) {
     for (let i = 0; i < c.hp; i++) {
@@ -410,6 +432,7 @@ function meteor(ctx, m, t) {
   ctx.restore();
 }
 function egg(ctx, e, t) {
+  if (e.fz) { drawIceShard(ctx, e, t); return; }
   ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(Math.sin(t * 6 + e.x) * 0.3);
   shadowEllipse(ctx, 3, 4, 8, 10, 0.25);
   if (drawSprite(ctx, 'egg', 22) || eventEgg(ctx, e, t)) { ctx.restore(); return; }
@@ -1170,19 +1193,22 @@ export function draw(ctx, s: State, me, t, { paused, silent, quiet, replay }: { 
   eventBack(ctx, t, quality.level);
   for (const p of list) if (!p.alive && !s.over) ghost(ctx, p, t);
   const full = quality.level >= 2;
+  drawFloorZones(ctx, s, t);
   for (const c of [...s.chickens].sort((a, b) => a.y - b.y)) {
     const ps = chickenSlot(c);
-    if (ps) packChicken(ctx, c, t, ps);
-    else if (full || c.boss) chicken(ctx, c, t, cenv); else chickenLite(ctx, c, t);
+    if (ps && !hasSkin(c) && !c.boss) packChicken(ctx, c, t, ps);
+    else if (full || c.boss || c.dec || c.sol) chicken(ctx, c, t, cenv); else chickenLite(ctx, c, t);
   }
   for (const g of s.gifts) gift(ctx, g, t);
   for (const e of s.eggs) egg(ctx, e, t);
+  drawAirZones(ctx, s, t);
   for (const m of s.meteors || []) meteor(ctx, m, t);
   bullets(ctx, s.bullets);
   arcs(ctx, s);
   beams(ctx, s, t);
   pulses(ctx, s);
   for (const p of list) if (p.alive) { ship(ctx, p, t); heatBar(ctx, p, t); }
+  drawFrozen(ctx, list, t);
   drawParts(ctx);
   if (list.length > 1) for (const p of list) if (p.alive) nameTag(ctx, p);
   eventFront(ctx, t, quality.level);

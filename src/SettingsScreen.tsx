@@ -29,6 +29,9 @@ export default function Settings({ onBack }: Record<string, any>) {
         <span />
       </div>
 
+      <h3>Fun</h3>
+      <Row title="Funny chickens" hint="Chickens dress up as pirates, ninjas, wizards, zombies, robots and more. Turn off for plain chickens."><Toggle k="costumes" /></Row>
+
       <h3>Accessibility</h3>
       <Row title="Vest patterns" hint="Adds a stripe, dot, zigzag or cross-hatch pattern to each vest tier, so tiers never depend on colour alone."><Toggle k="patterns" /></Row>
       <Row title="Reduce flashing and motion" hint="No screen shake, bright flashes, lens ripples, slow-motion, or beat pulsing in the background."><Toggle k="reduceFlash" /></Row>
